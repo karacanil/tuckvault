@@ -78,7 +78,9 @@ class Remote:
                     break
         except OSError:
             pass
-        raise ConnectError(self._failure("Could not reach the backup machine"))
+        where = self.dest.get("host") or self.dest.get("path") or ""
+        raise ConnectError(self._failure(
+            f'Could not reach the backup machine "{where}". Is it switched on and connected?'))
 
     def _drain_stderr(self):
         try:
@@ -93,7 +95,7 @@ class Remote:
         except Exception:
             pass
         detail = " ".join(s for s in self._stderr if s)[-300:]
-        return f"{what}: {detail}" if detail else what
+        return f"{what} ({detail})" if detail else what
 
     def close(self):
         if not self.proc:
