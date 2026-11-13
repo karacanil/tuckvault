@@ -46,6 +46,21 @@
 - Downloads are **not code-signed** yet. Compare them against
   `SHA256SUMS.txt` from the same release.
 
+## Known limitations
+
+- There is no alarm yet for backups that silently stop happening, for
+  example when the scheduled task is disabled or the settings file is
+  damaged. The Backup tab shows the last successful backup.
+- A backup computer that stalls without closing the connection can hold a
+  backup run for a long time before it gives up.
+- `safekeep-cli key import <key>` takes the key on the command line, where
+  shell history can keep it, and the Copy button puts it on the clipboard.
+  Prefer the import dialog in the window.
+- One backup can list roughly a million files; beyond that the index is
+  too large for the destination to accept.
+- Backups whose index cannot be read (and cannot be put back from the PC's
+  copy) are removed once they are older than the newest N.
+
 ## Checks before every release
 
 The release workflow runs the test suite (including damage, tampering,

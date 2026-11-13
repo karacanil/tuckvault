@@ -41,8 +41,9 @@ First packaged release.
   computer and always insist on a known host key. Windows system programs
   are started by full path.
 - Restoring can never write outside the folder you chose.
-- An independent code review was done before this release; its findings
-  are fixed and covered by tests.
+- An independent code review was done before this release. Its high and
+  medium findings are fixed and covered by tests; the remaining minor
+  ones are listed under "Known limitations" in SECURITY.md.
 
 **Changed**
 
