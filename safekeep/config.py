@@ -4,6 +4,8 @@ import copy
 import hashlib
 import json
 import os
+import tempfile
+import time
 from pathlib import Path
 
 from . import paths
@@ -14,7 +16,7 @@ FREQUENCIES = ["hourly", "daily", "weekly", "monthly"]
 DEFAULTS = {
     "sources": [],
     "excludes": ["Thumbs.db", "desktop.ini", "~$*", "*.tmp"],
-    "destination": {"type": "ssh", "host": "laptop", "path": "safekeep-repo"},
+    "destination": {"type": "ssh", "host": "", "path": "safekeep-repo", "folder": ""},
     "schedule": {
         "enabled": True,
         "frequency": "weekly",
@@ -83,12 +85,27 @@ def read_json(path: Path, default):
 
 
 def write_json(path: Path, data) -> None:
-    tmp = Path(str(path) + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=1)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    # Own temp name per writer: the window and a scheduled run may save at the same moment.
+    fd, tmp = tempfile.mkstemp(prefix=Path(path).name + ".", suffix=".tmp", dir=str(Path(path).parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
+        for attempt in range(20):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:  # Windows: someone is reading it right now
+                if attempt == 19:
+                    raise
+                time.sleep(0.05)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 
 def _merge(base: dict, extra: dict) -> dict:
@@ -123,6 +140,35 @@ def record_run(result: dict) -> None:
     if result.get("status") in ("success", "warning") and result.get("kind") == "backup":
         st["last_success"] = result.get("finished")
     st["history"] = ([result] + st["history"])[:100]
+    write_json(paths.state_file(), st)
+
+
+def destination_key(destination: dict) -> str:
+    """Names one destination, to remember which set of backups belongs there."""
+    if destination.get("type") == "local":
+        folder = destination.get("folder") or destination.get("path") or ""
+        return "folder|" + _norm(folder)
+    return "ssh|%s|%s" % ((destination.get("host") or "").strip().lower(),
+                          (destination.get("path") or "safekeep-repo").strip())
+
+
+def known_repo(destination: dict):
+    """Id of the set of backups last seen at this destination, or None."""
+    return (load_state().get("known_repos") or {}).get(destination_key(destination))
+
+
+def remember_repo(destination: dict, repo_id) -> None:
+    """repo_id None forgets the destination (the user chose to start over there)."""
+    st = load_state()
+    known = dict(st.get("known_repos") or {})
+    key = destination_key(destination)
+    if known.get(key) == repo_id:
+        return
+    if repo_id is None:
+        known.pop(key, None)
+    else:
+        known[key] = repo_id
+    st["known_repos"] = known
     write_json(paths.state_file(), st)
 
 

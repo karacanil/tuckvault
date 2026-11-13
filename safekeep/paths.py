@@ -1,6 +1,7 @@
 """Where Safekeep keeps its own files on this PC."""
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -42,12 +43,21 @@ def lock_file() -> Path:
 
 
 def snapshot_cache(repo_id: str) -> Path:
+    if not re.fullmatch(r"[0-9a-f]{16}", repo_id or ""):  # it becomes a folder name
+        raise ValueError("bad repository id")
     d = app_dir() / "snapshots" / repo_id
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
+def is_frozen() -> bool:
+    """True in the packaged Windows build (Safekeep.exe), False when run from source."""
+    return bool(getattr(sys, "frozen", False))
+
+
 def project_root() -> Path:
+    if is_frozen():
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent
 
 

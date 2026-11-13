@@ -23,13 +23,18 @@ import sys
 
 try:
     import fcntl
-except ImportError:  # Windows (local destinations, tests)
+except ImportError:  # Windows (folder destinations)
     fcntl = None
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 
 MARKER = b"SAFEKEEP-AGENT 1\n"
 MAX_PAYLOAD = 64 * 1024 * 1024
 BLOB_RE = re.compile(r"^[0-9a-f]{64}$")
 SNAP_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,99}$")
+TMP_RE = re.compile(r"^[0-9]+\..+\.tmp$")  # only ever remove temp files this program made
 
 
 class Err(Exception):
@@ -103,6 +108,17 @@ class Agent:
         self.out.flush()
 
     def serve(self):
+        try:
+            self._serve()
+        finally:
+            if self.lock_fh is not None:  # matters when the agent runs inside the client process
+                try:
+                    self.lock_fh.close()
+                except OSError:
+                    pass
+                self.lock_fh = None
+
+    def _serve(self):
         self.out.write(MARKER)
         self.out.flush()
         while True:
@@ -146,12 +162,12 @@ class Agent:
         return os.path.join(self.root, *parts)
 
     def blob_path(self, name):
-        if not BLOB_RE.match(name or ""):
+        if not BLOB_RE.fullmatch(name or ""):
             raise Err("bad blob name")
         return self.p("blobs", name[:2], name)
 
     def snap_path(self, name):
-        if not SNAP_RE.match(name or ""):
+        if not SNAP_RE.fullmatch(name or ""):
             raise Err("bad snapshot name")
         return self.p("snapshots", name)
 
@@ -172,21 +188,28 @@ class Agent:
             os.chmod(root, 0o700)
         except OSError:
             pass
-        if fcntl is not None:
-            fh = open(os.path.join(root, "lock"), "a+")
-            try:
+        # One user of the repository at a time, whoever and wherever they are.
+        fh = open(os.path.join(root, "lock"), "a+")
+        try:
+            if fcntl is not None:
                 fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                fh.close()
-                raise Err("the backup repository is in use by another backup")
-            self.lock_fh = fh
+            elif msvcrt is not None:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            fh.close()
+            raise Err("the backup repository is in use by another backup")
+        self.lock_fh = fh
         self.root = root
-        # leftovers from an interrupted upload are never referenced; drop them
-        for name in os.listdir(self.p("tmp")):
-            try:
-                os.remove(self.p("tmp", name))
-            except OSError:
-                pass
+        # Leftovers from an interrupted upload are never referenced; drop them.
+        # Only in a folder that already was a repository, and only our own files.
+        if exists:
+            for name in os.listdir(self.p("tmp")):
+                if TMP_RE.fullmatch(name):
+                    try:
+                        os.remove(self.p("tmp", name))
+                    except OSError:
+                        pass
         meta = None
         if exists:
             with open(self.p("repo.json"), "r") as f:
@@ -212,7 +235,7 @@ class Agent:
             if not os.path.isdir(d):
                 continue
             for name in os.listdir(d):
-                if BLOB_RE.match(name):
+                if BLOB_RE.fullmatch(name):
                     try:
                         lines.append("%s %d" % (name, os.path.getsize(os.path.join(d, name))))
                     except OSError:
@@ -241,15 +264,23 @@ class Agent:
             raise Err("blob %s is missing" % hdr.get("name"))
 
     def op_verify_blobs(self, hdr, payload):
-        """mode=quick: present and non-empty. mode=full: re-hash content."""
+        """mode=quick: present and non-empty. mode=full: re-hash content.
+
+        "unreadable" means the disk refused to give the data this time. That
+        can be temporary (loose cable, busy share), so it is never treated
+        as proof of damage.
+        """
         full = hdr.get("mode") == "full"
-        missing, corrupt, nbytes = [], [], 0
+        missing, corrupt, unreadable, nbytes = [], [], [], 0
         for name in self.names(payload):
             path = self.blob_path(name)
             try:
                 size = os.path.getsize(path)
-            except OSError:
+            except FileNotFoundError:
                 missing.append(name)
+                continue
+            except OSError:
+                unreadable.append(name)
                 continue
             nbytes += size
             if size == 0:
@@ -259,8 +290,27 @@ class Agent:
                     if _sha256_file(path) != name:
                         corrupt.append(name)
                 except OSError:
-                    corrupt.append(name)
-        return {"missing": missing, "corrupt": corrupt, "bytes": nbytes}
+                    unreadable.append(name)
+        return {"missing": missing, "corrupt": corrupt, "unreadable": unreadable, "bytes": nbytes}
+
+    def op_quarantine_blobs(self, hdr, payload):
+        """Move damaged blobs aside instead of destroying them."""
+        qdir = self.p("quarantine")
+        if not os.path.isdir(qdir):
+            os.makedirs(qdir, 0o700)
+        n = 0
+        for name in self.names(payload):
+            src = self.blob_path(name)
+            for i in range(1000):
+                dst = os.path.join(qdir, "%s.%d" % (name, i))
+                if not os.path.exists(dst):
+                    break
+            try:
+                os.replace(src, dst)
+                n += 1
+            except FileNotFoundError:
+                pass
+        return {"moved": n}
 
     def op_delete_blobs(self, hdr, payload):
         n = 0
@@ -275,13 +325,24 @@ class Agent:
     def op_list_snapshots(self, hdr, payload):
         out = []
         for name in sorted(os.listdir(self.p("snapshots"))):
-            if SNAP_RE.match(name) and name.endswith(".snap"):
+            if SNAP_RE.fullmatch(name) and name.endswith(".snap"):
                 out.append({"name": name, "size": os.path.getsize(self.p("snapshots", name))})
         return {"snapshots": out}
 
+    def op_hash_snapshots(self, hdr, payload):
+        """SHA-256 of every stored snapshot file, so the client can compare with its copies."""
+        out = {}
+        for name in sorted(os.listdir(self.p("snapshots"))):
+            if SNAP_RE.fullmatch(name) and name.endswith(".snap"):
+                try:
+                    out[name] = _sha256_file(self.p("snapshots", name))
+                except OSError:
+                    out[name] = None
+        return {"hashes": out}
+
     def op_put_snapshot(self, hdr, payload):
         path = self.snap_path(hdr.get("name"))
-        if os.path.exists(path):
+        if os.path.exists(path) and not hdr.get("replace"):
             raise Err("snapshot already exists")
         if hashlib.sha256(payload).hexdigest() != hdr.get("sha256"):
             raise Err("snapshot arrived damaged (hash mismatch)")

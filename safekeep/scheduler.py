@@ -118,6 +118,9 @@ def _trigger_xml(schedule: dict) -> str:
 def _runner():
     """(command, arguments, working directory) for the scheduled run."""
     exe = Path(sys.executable)
+    if paths.is_frozen():  # the installed app: Safekeep.exe itself, which has no console window
+        gui_exe = exe.with_name("Safekeep.exe")
+        return str(gui_exe if gui_exe.exists() else exe), "run --scheduled", str(paths.project_root())
     pythonw = exe.with_name("pythonw.exe")
     return str(pythonw if pythonw.exists() else exe), "-m safekeep run --scheduled", str(paths.project_root())
 
@@ -202,6 +205,15 @@ def _delete(name: str) -> None:
 def remove() -> None:
     for name in installed():
         _delete(name)
+
+
+def refresh(cfg: dict) -> None:
+    """Re-register existing tasks, so they follow the app if its folder moved or it was updated."""
+    try:
+        if installed():
+            apply(cfg)
+    except OSError:
+        pass
 
 
 def apply(cfg: dict) -> None:

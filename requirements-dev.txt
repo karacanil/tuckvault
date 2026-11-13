@@ -1,0 +1,5 @@
+# Only needed to build, draw the icon and run the security checks.
+pyinstaller>=6
+pillow>=10
+bandit>=1.7
+pip-audit>=2.7

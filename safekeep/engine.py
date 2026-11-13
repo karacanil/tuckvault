@@ -5,13 +5,14 @@ import logging
 import logging.handlers
 import os
 import platform
+import re
 import secrets
 import sys
 import time
 from datetime import datetime, timezone
 
 from . import config, crypto, keystore, paths
-from .remote import ConnectError, Remote, RemoteError, folder_of
+from .remote import SNAP_NAME, ConnectError, Remote, RemoteError, folder_of
 
 CHUNK = 4 * 1024 * 1024
 VERIFY_BATCH = 200
@@ -25,6 +26,10 @@ class BackupError(Exception):
 
 class AlreadyRunning(BackupError):
     pass
+
+
+class RepoChanged(BackupError):
+    """The destination does not hold the set of backups it held last time."""
 
 
 # -- small helpers --------------------------------------------------------
@@ -106,8 +111,18 @@ class Repo:
         self.remote = Remote(cfg["destination"])
         self.remote.connect()
         try:
-            info = self.remote.open(create=create)
+            known = config.known_repo(cfg["destination"])
+            info = self.remote.open(create=create and known is None)
             meta = info.get("meta")
+            if known is not None and (meta is None or meta["id"] != known):
+                # An empty or different folder where our backups used to be. Usually a
+                # disk that is not mounted or another drive on the same letter; never
+                # quietly start over, or the missing backups would go unnoticed.
+                raise RepoChanged(
+                    "The backup destination no longer holds the backups that were there before"
+                    + (" (it is empty)." if meta is None else " (it holds a different set).")
+                    + " Check that the right disk or folder is connected. To start a new set "
+                      "of backups there on purpose, use Back up now in the Safekeep window.")
             if meta is None:
                 if not create:
                     raise BackupError("There are no backups at the destination yet.")
@@ -130,6 +145,7 @@ class Repo:
                         "Import the right recovery key, or choose an empty destination folder.")
             self.id = meta["id"]
             self._manifests = {}
+            config.remember_repo(cfg["destination"], self.id)
         except BaseException:
             self.remote.close()
             raise
@@ -157,13 +173,13 @@ class Repo:
                 manifest = self.keys.open_snapshot(cached.read_bytes())
             except crypto.IntegrityError:
                 manifest = None
+        fetched = None
         if manifest is None:
-            raw = self.remote.get_snapshot(name)
-            manifest = self.keys.open_snapshot(raw)
-            cached.write_bytes(raw)
-        if manifest.get("name") not in (None, name):
-            raise crypto.IntegrityError("a backup is stored under a different name than it was "
-                                        "created with (possible tampering)")
+            fetched = self.remote.get_snapshot(name)
+            manifest = self.keys.open_snapshot(fetched)
+        _check_name(manifest, name)
+        if fetched is not None:  # only what passed every check is kept on this PC
+            cached.write_bytes(fetched)
         self._manifests[name] = manifest
         return manifest
 
@@ -177,8 +193,17 @@ class Repo:
         present = set(self.snapshot_names())
         gone = []
         for cached in paths.snapshot_cache(self.id).glob("*.snap"):
-            if cached.name not in present:
-                gone.append(cached.name)
+            if cached.name in present or not SNAP_NAME.fullmatch(cached.name):
+                continue
+            gone.append(cached.name)
+            # This PC still has the backup's index. If only that small file was
+            # lost over there, putting it back makes the backup whole again; if
+            # its data is gone too, the next check says so.
+            try:
+                raw = cached.read_bytes()
+                _check_name(self.keys.open_snapshot(raw), cached.name)
+                self.remote.put_snapshot(cached.name, raw)
+            except (crypto.IntegrityError, RemoteError, OSError):
                 try:
                     cached.unlink()
                 except OSError:
@@ -186,6 +211,32 @@ class Repo:
         if gone:
             log.error("backups vanished from the destination: %s", ", ".join(sorted(gone)))
         return sorted(gone)
+
+    def repair_indexes(self) -> int:
+        """Compare every stored backup index with the copy on this PC; put back damaged ones."""
+        healed = 0
+        hashes = self.remote.snapshot_hashes()
+        for name, remote_hash in hashes.items():
+            cached = paths.snapshot_cache(self.id) / name
+            try:
+                raw = cached.read_bytes()
+            except OSError:
+                continue
+            if crypto.sha256_hex(raw) == remote_hash:
+                continue
+            try:
+                _check_name(self.keys.open_snapshot(raw), name)
+            except crypto.IntegrityError:
+                try:  # our copy is the bad one; the stored one is fetched again when needed
+                    cached.unlink()
+                except OSError:
+                    pass
+                self._manifests.pop(name, None)
+                continue
+            self.remote.put_snapshot(name, raw, replace=True)
+            healed += 1
+            log.error("backup index %s was damaged at the destination and has been put back", name)
+        return healed
 
     def referenced_blobs(self, names):
         """blob name -> set of snapshot names that need it."""
@@ -195,6 +246,28 @@ class Repo:
                 for blob in f["c"]:
                     refs.setdefault(blob, set()).add(snap)
         return refs
+
+
+def _check_name(manifest: dict, name: str) -> None:
+    """A backup index must belong under the name it is stored as.
+
+    Stops the storage side from presenting an old backup as a newer one.
+    Indexes written before 1.1 carry no name; for those the creation time
+    inside must agree with the time in the file name.
+    """
+    inside = manifest.get("name")
+    if inside is not None:
+        ok = inside == name
+    else:
+        try:
+            named = datetime.strptime(name[:15], "%Y%m%dT%H%M%S")
+            created = datetime.strptime(manifest["created"], "%Y-%m-%dT%H:%M:%SZ")
+            ok = abs((created - named).total_seconds()) <= 300
+        except (KeyError, TypeError, ValueError):
+            ok = False
+    if not ok:
+        raise crypto.IntegrityError("a backup is stored under a different name than it was "
+                                    "created with (possible tampering)")
 
 
 def _connect(cfg, create, attempts=1, wait=20, progress=None) -> Repo:
@@ -291,6 +364,8 @@ def run_backup(cfg: dict = None, progress=None, attempts: int = 1,
             _backup(cfg, sources, result, progress, attempts)
     except AlreadyRunning as e:
         result.update(status="skipped", error=str(e))
+    except RepoChanged as e:
+        result.update(error=str(e), code="repo_changed")
     except (BackupError, RemoteError, crypto.IntegrityError) as e:
         result["error"] = str(e)
     except Exception as e:
@@ -299,7 +374,10 @@ def run_backup(cfg: dict = None, progress=None, attempts: int = 1,
     result["finished"] = now_iso()
     result["warnings"] = result["warnings"][:50]
     if result["status"] != "skipped":
-        config.record_run(result)
+        try:
+            config.record_run(result)
+        except OSError:
+            log.exception("could not write the run history")
     log.info("backup finished: %s %s", result["status"], result.get("error", ""))
     for w in result["warnings"]:
         log.warning("%s", w)
@@ -331,8 +409,9 @@ def _backup(cfg, sources, result, progress, attempts):
         remote, keys = repo.remote, repo.keys
         gone = repo.vanished()
         if gone:
-            warnings.append(f"{len(gone)} earlier backups have disappeared from the backup "
-                            "destination without Safekeep removing them.")
+            warnings.append(f"{len(gone)} earlier backups had disappeared from the backup "
+                            "destination without Safekeep removing them. Use Check all backups "
+                            "now on the Restore tab to see whether they are complete.")
         blobs = remote.list_blobs()
         free = remote.call("stat")[0]["free"]
 
@@ -412,21 +491,29 @@ def _backup(cfg, sources, result, progress, attempts):
             problems = _scrub(repo, progress)
             result["scrubbed"] = True
 
-        _prune(repo, int(cfg.get("keep_last") or 0), progress)
+        _prune(repo, int(cfg.get("keep_last") or 0), progress, protect=snap_name)
 
         if problems:
             raise BackupError(problems)
     result["status"] = "warning" if warnings else "success"
 
 
-def _check(remote, names, full, progress=None, label="Verifying stored data…"):
-    """Return the blob names that are missing or damaged."""
-    bad = []
+def _check_detail(remote, names, full, progress=None, label="Verifying stored data…"):
+    """Return (missing, damaged, unreadable just now) blob names."""
+    missing, corrupt, flaky = [], [], []
     for i in range(0, len(names), VERIFY_BATCH):
         _progress(progress, "verify", i, len(names), label)
         resp = remote.verify_blobs(names[i:i + VERIFY_BATCH], full=full)
-        bad += resp["missing"] + resp["corrupt"]
-    return bad
+        missing += resp["missing"]
+        corrupt += resp["corrupt"]
+        flaky += resp["unreadable"]
+    return missing, corrupt, flaky
+
+
+def _check(remote, names, full, progress=None):
+    """Return the blob names that cannot be counted on right now."""
+    missing, corrupt, flaky = _check_detail(remote, names, full, progress)
+    return missing + corrupt + flaky
 
 
 def _scrub_due(cfg) -> bool:
@@ -444,12 +531,15 @@ def _scrub_due(cfg) -> bool:
 
 
 def _scrub(repo: Repo, progress=None):
-    """Re-hash every stored blob. Returns a problem description or None.
+    """Re-check everything stored. Returns a problem description or None.
 
-    Damaged blobs are deleted on purpose: they are useless, and removing
-    them makes the next backup upload a fresh copy if the file still exists.
+    Pieces whose content no longer matches their hash are moved aside at the
+    destination (not destroyed), so the next backup sends a fresh copy if
+    the file still exists. Pieces that merely could not be read this time
+    are left alone: that is often a loose cable or a busy share.
     """
     gone = repo.vanished()
+    healed = repo.repair_indexes()
     names = repo.snapshot_names()
     unreadable = []
     for n in names:
@@ -459,32 +549,39 @@ def _scrub(repo: Repo, progress=None):
             unreadable.append(n)
     good = [n for n in names if n not in unreadable]
     refs = repo.referenced_blobs(good)
-    bad = _check(repo.remote, sorted(refs), full=True, progress=progress)
+    missing, corrupt, flaky = _check_detail(repo.remote, sorted(refs), full=True, progress=progress)
     config.update_state(last_scrub=now_iso())
+    if corrupt:
+        repo.remote.quarantine_blobs(corrupt)
+    bad = missing + corrupt
     if bad:
-        repo.remote.delete_blobs(bad)
-        log.error("scrub found %d damaged/missing blobs: %s", len(bad), ", ".join(b[:12] for b in bad))
-    log.info("scrub: %d blobs checked, %d bad, %d unreadable snapshots",
-             len(refs), len(bad), len(unreadable))
-    if not bad and not unreadable and not gone:
-        return None
+        log.error("scrub found %d damaged/missing blobs: %s", len(bad), ", ".join(x[:12] for x in bad))
+    log.info("scrub: %d blobs checked, %d bad, %d unreadable now, %d unreadable snapshots, "
+             "%d indexes put back", len(refs), len(bad), len(flaky), len(unreadable), healed)
     hit = set()
-    for b in bad:
-        hit |= refs[b]
+    for x in bad:
+        hit |= refs[x]
     parts = []
     if bad:
-        parts.append(f"{len(bad)} stored pieces were damaged or missing on the backup machine, "
+        parts.append(f"{len(bad)} stored pieces were damaged or missing at the backup destination, "
                      f"affecting {len(hit)} of {len(good)} backups. Run a backup now to re-send "
                      "the files that still exist on this PC.")
+    if flaky:
+        parts.append(f"{len(flaky)} stored pieces could not be read just now. That can be a "
+                     "temporary disk or connection problem; nothing was changed. Run the check again.")
     if unreadable:
         parts.append(f"{len(unreadable)} backups could not be read at all (damaged index).")
+    if healed:
+        parts.append(f"The index of {healed} backups was damaged at the destination and has been "
+                     "put back from the copy on this PC.")
     if gone:
-        parts.append(f"{len(gone)} earlier backups have disappeared from the backup destination "
-                     "without Safekeep removing them.")
-    return " ".join(parts)
+        parts.append(f"{len(gone)} earlier backups had disappeared from the backup destination "
+                     "without Safekeep removing them; they were put back where this PC still "
+                     "had what was needed.")
+    return " ".join(parts) or None
 
 
-def _prune(repo: Repo, keep_last: int, progress=None):
+def _prune(repo: Repo, keep_last: int, progress=None, protect: str = None):
     """Drop old snapshots, then delete data nothing refers to.
 
     The newest keep_last backups of every item are kept. Items can be on
@@ -493,7 +590,9 @@ def _prune(repo: Repo, keep_last: int, progress=None):
     """
     names = sorted(repo.snapshot_names())
     if keep_last > 0:
-        keep, count = set(), {}
+        # The backup just made is never removed, even if this PC's clock went
+        # backwards and its name therefore sorts as "old".
+        keep, count = ({protect} if protect else set()), {}
         for pos, name in enumerate(reversed(names)):
             try:
                 items = repo.manifest(name).get("sources") or [""]
@@ -558,24 +657,36 @@ def list_snapshots(cfg: dict = None):
     setup_logging()
     cfg = cfg or config.load()
     out = []
-    with _connect(cfg, create=False) as repo:
-        for name in sorted(repo.snapshot_names(), reverse=True):
-            try:
-                m = repo.manifest(name)
-                out.append({"name": name, "created": m["created"], "files": m["stats"]["files"],
-                            "bytes": m["stats"]["bytes"], "warnings": len(m.get("warnings", [])),
-                            "sources": m.get("sources", [])})
-            except crypto.IntegrityError as e:
-                out.append({"name": name, "error": str(e)})
+    try:
+        with _connect(cfg, create=False) as repo:
+            for name in sorted(repo.snapshot_names(), reverse=True):
+                try:
+                    m = repo.manifest(name)
+                    out.append({"name": name, "created": m["created"], "files": m["stats"]["files"],
+                                "bytes": m["stats"]["bytes"], "warnings": len(m.get("warnings", [])),
+                                "sources": m.get("sources", [])})
+                except (crypto.IntegrityError, KeyError, TypeError) as e:
+                    out.append({"name": name, "error": str(e) or "damaged"})
+    except RemoteError as e:
+        raise BackupError(str(e))
     return out
 
 
 def _restore_target(dest: str, original: str) -> str:
     """Map an original absolute path to a safe path below dest."""
-    p = original.replace("\\", "/")
-    parts = [x.rstrip(":") for x in p.split("/") if x not in ("", ".", "..", "?")]
-    parts = [x for x in parts if x]
-    return os.path.join(dest, *parts)
+    parts = []
+    for x in original.replace("\\", "/").split("/"):
+        if re.fullmatch(r"[A-Za-z]:", x):
+            x = x[0]  # drive letter becomes a folder
+        # no drive switches, no "..", none of the names Windows would reinterpret
+        x = x.replace(":", "_").rstrip(". ")
+        if x and x != "?":
+            parts.append(x)
+    target = os.path.join(dest, *parts)
+    root = os.path.abspath(dest)
+    if not parts or os.path.commonpath([os.path.abspath(target), root]) != root:
+        raise BackupError(f"Refusing to restore outside the chosen folder: {original}")
+    return target
 
 
 def run_restore(snapshot: str, dest: str, cfg: dict = None, progress=None) -> dict:

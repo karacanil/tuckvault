@@ -152,6 +152,7 @@ class App(tk.Tk):
         self._refresh_summary()
         self._refresh_activity()
         self._poll_id = self.after(100, self._poll)
+        threading.Thread(target=scheduler.refresh, args=(config.load(),), daemon=True).start()
 
     def destroy(self):
         self.after_cancel(self._poll_id)
@@ -653,6 +654,17 @@ class App(tk.Tk):
         cfg = self.cfg
 
         def done(result):
+            if result.get("code") == "repo_changed":
+                self.status.configure(text="Failed")
+                if messagebox.askyesno(
+                        "Safekeep", result["error"].split(" To start a new set")[0]
+                        + "\n\nIf that is expected (a new or emptied disk), Safekeep can start a "
+                          "new set of backups there. Backups that were there before are not "
+                          "brought back by this.\n\nStart a new set of backups at this destination?",
+                        icon="warning", default="no"):
+                    config.remember_repo(cfg["destination"], None)
+                    self.after(50, self._backup_now)
+                return
             self._report(result, f"Backup complete: {result.get('files', 0)} files, "
                                  f"{human_size(result.get('uploaded_bytes'))} sent.")
             if self.notebook.index("current") == 1:

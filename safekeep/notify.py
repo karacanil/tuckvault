@@ -48,6 +48,8 @@ def _message_box(title: str, body: str) -> None:
 
 def notify(title: str, body: str) -> None:
     """Show a Windows notification; fall back to a message box if toasts fail."""
+    # control characters would make Windows reject the notification
+    body = "".join(c if c.isprintable() else " " for c in body)
     body = body if len(body) <= 300 else body[:297] + "…"
     if sys.platform != "win32":
         print(f"{title}: {body}", file=sys.stderr)

@@ -313,6 +313,148 @@ class UntrustedStorage(Base):
         import json
         return json.loads((self.repo / "repo.json").read_text())["id"]
 
+    def fake_remote(self, reply_header: dict):
+        """A Remote whose other side answers with exactly this header."""
+        import io
+        import json
+        import struct
+        from safekeep import remote
+
+        class Fake:
+            stdin, stderr = io.BytesIO(), io.BytesIO()
+
+            def poll(self):
+                return 0
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                pass
+
+        raw = json.dumps(dict(reply_header, ok=True)).encode()
+        r = remote.Remote({"type": "local", "folder": "x"})
+        r.proc = Fake()
+        r.proc.stdout = io.BytesIO(struct.pack(">I", len(raw)) + raw)
+        return r
+
+    def test_file_names_from_storage_cannot_leave_the_cache_folder(self):
+        from safekeep import remote
+        for bad in ("..\\..\\key.bin", "../../key.bin", "C:\\Users\\x\\doc.snap", "a/b.snap",
+                    "20260101T000000.000000Z-abcdef.snap\n", "x.txt", ""):
+            with self.assertRaises(remote.RemoteError, msg=bad):
+                self.fake_remote({"snapshots": [{"name": bad, "size": 1}]}).list_snapshots()
+        for bad_id in ("..\\..\\..", "C:\\Windows", "abc", 5, None):
+            with self.assertRaises(remote.RemoteError, msg=str(bad_id)):
+                self.fake_remote({"meta": {"id": bad_id, "key_check": "x"}}).open(create=False)
+        with self.assertRaises(remote.RemoteError):  # a name that was never asked about
+            self.fake_remote({"missing": ["f" * 64], "corrupt": []}).verify_blobs(["a" * 64], full=True)
+        with self.assertRaises(ValueError):
+            paths.snapshot_cache("..\\..\\elsewhere")
+
+    def test_tampered_repo_id_is_refused_before_touching_local_files(self):
+        import json
+        self.backup()
+        key_before = paths.key_file().read_bytes()
+        meta = json.loads((self.repo / "repo.json").read_text())
+        meta["id"] = "..\\..\\..\\victim"
+        (self.repo / "repo.json").write_text(json.dumps(meta))
+        r = self.backup(expect="failed")
+        self.assertIn("invalid reply", r["error"])
+        self.assertEqual(paths.key_file().read_bytes(), key_before)
+        self.assertFalse((self.tmp / "victim").exists())
+
+    def test_emptied_destination_is_not_silently_started_over(self):
+        self.backup()
+        shutil.rmtree(self.repo)  # the disk is not mounted, or was wiped
+        r = self.backup(expect="failed")
+        self.assertEqual(r.get("code"), "repo_changed")
+        self.assertFalse((self.repo / "repo.json").exists())  # nothing was created there
+        self.assertEqual(engine.run_verify(self.cfg)["status"], "failed")
+        config.remember_repo(self.cfg["destination"], None)  # the user says: start over
+        self.backup()
+
+    def test_swapped_destination_is_noticed(self):
+        import json
+        self.backup()
+        meta = json.loads((self.repo / "repo.json").read_text())
+        meta["id"] = "0123456789abcdef"
+        (self.repo / "repo.json").write_text(json.dumps(meta))
+        self.assertEqual(self.backup(expect="failed").get("code"), "repo_changed")
+
+    def test_damaged_backup_index_is_put_back(self):
+        snap = self.backup()["snapshot"]
+        stored = self.repo / "snapshots" / snap
+        good = stored.read_bytes()
+        stored.write_bytes(b"rotten")
+        r = engine.run_verify(self.cfg)
+        self.assertIn("put back", r["error"])
+        self.assertEqual(stored.read_bytes(), good)
+        self.assertEqual(engine.run_verify(self.cfg)["status"], "success")
+
+    def test_lost_backup_index_is_put_back(self):
+        snap = self.backup()["snapshot"]
+        (self.repo / "snapshots" / snap).unlink()
+        self.assertIn("disappeared", engine.run_verify(self.cfg)["error"])
+        res, restored = self.restore(snap)
+        self.assertEqual(res["status"], "success", res)
+        self.assert_same_tree(restored)
+
+    def test_damaged_data_is_set_aside_not_destroyed(self):
+        self.backup()
+        blob = self.blob_files()[0]
+        blob.write_bytes(b"garbage")
+        self.assertEqual(engine.run_verify(self.cfg)["status"], "failed")
+        self.assertFalse(blob.exists())
+        self.assertEqual([p.name for p in (self.repo / "quarantine").iterdir()], [blob.name + ".0"])
+
+    def test_old_format_backup_under_wrong_name_is_rejected(self):
+        self.backup()
+        keys = crypto.Keys(keystore.load())
+        legacy = {"v": 1, "created": engine.now_iso(), "host": "x", "sources": [str(self.src)],
+                  "files": [], "stats": {"files": 0, "bytes": 0}, "warnings": []}
+        (self.repo / "snapshots" / "20300101T000000.000000Z-abcdef.snap").write_bytes(
+            keys.seal_snapshot(legacy))
+        listed = {s["name"]: s for s in engine.list_snapshots(self.cfg)}
+        self.assertIn("different name", listed["20300101T000000.000000Z-abcdef.snap"]["error"])
+
+    def test_new_backup_survives_a_clock_that_went_backwards(self):
+        from datetime import datetime as real
+        from unittest import mock
+
+        class Past(real):
+            @classmethod
+            def now(cls, tz=None):
+                return real(2020, 1, 1, 12, 0, 0, tzinfo=tz)
+
+        self.cfg["keep_last"] = 1
+        self.backup()
+        (self.src / "a.txt").write_bytes(b"changed after the clock was reset")
+        with mock.patch.object(engine, "datetime", Past):
+            snap = self.backup()["snapshot"]
+        self.assertTrue(snap.startswith("2020"))
+        self.assertIn(snap, [s["name"] for s in engine.list_snapshots(self.cfg)])
+        res, restored = self.restore(snap)
+        self.assertEqual(res["status"], "success", res)
+        self.assert_same_tree(restored)
+
+    def test_first_backup_into_an_existing_folder_leaves_its_files_alone(self):
+        (self.repo / "tmp").mkdir(parents=True)
+        (self.repo / "tmp" / "someone-elses.txt").write_text("keep me")
+        self.backup()
+        self.backup()
+        self.assertEqual((self.repo / "tmp" / "someone-elses.txt").read_text(), "keep me")
+
+    def test_restore_never_leaves_the_chosen_folder(self):
+        dest = str(self.tmp / "out")
+        root = os.path.abspath(dest)
+        for evil in ("C:\\a\\..:\\..:\\b.txt", "Z:evil.txt", "a\\Z:\\evil.txt", "..\\..\\x", "/etc/../../x",
+                     "\\\\server\\share\\f.txt", "C:\\ok\\. .\\f"):
+            target = os.path.abspath(engine._restore_target(dest, evil))
+            self.assertEqual(os.path.commonpath([target, root]), root, evil)
+        with self.assertRaises(engine.BackupError):
+            engine._restore_target(dest, "..\\..")
+
 
 class Destinations(Base):
     def test_bootstrap_path_used_for_ssh(self):

@@ -160,6 +160,28 @@ class GuiFlow(unittest.TestCase):
         self.assertTrue(config.load()["recovery_key_saved"])
         self.assertEqual(app.key_banner.winfo_manager(), "")
 
+    def test_starting_over_at_an_emptied_destination_needs_a_yes(self):
+        app = self.app
+        app._add_paths([str(self.src)])
+        app._backup_now()
+        self.wait_idle()
+        shutil.rmtree(self.tmp / "repo")
+        self.dialogs.clear()
+        with mock.patch.object(gui.messagebox, "askyesno", return_value=False) as ask:
+            app._backup_now()
+            self.wait_idle()
+            self.assertEqual(ask.call_count, 1)
+            self.assertIn("no longer holds", ask.call_args[0][1])
+        self.assertFalse((self.tmp / "repo").exists())
+        app._backup_now()  # the recorder answers yes
+        self.wait_idle()
+        end = time.time() + 30
+        while not (self.tmp / "repo" / "repo.json").exists() or app.busy:
+            self.assertLess(time.time(), end)
+            app.update()
+            time.sleep(0.02)
+        self.assertIn("Backup complete", app.status.cget("text"))
+
     def test_folder_destination(self):
         app = self.app
         self.assertEqual(app.v_dest.get(), gui.DEST_LABELS["local"])

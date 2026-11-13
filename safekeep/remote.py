@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -20,6 +21,19 @@ MAX_PAYLOAD = 512 * 1024 * 1024
 # Nothing has to be installed there except python3.
 _BOOT = "import sys;exec(sys.stdin.buffer.read(int(sys.stdin.buffer.readline())))"
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+# Names coming back from the storage side end up in local file paths, so
+# they are checked here as well, not only by the agent.
+BLOB_NAME = re.compile(r"[0-9a-f]{64}")
+SNAP_NAME = re.compile(r"[0-9A-Za-z][0-9A-Za-z._-]{0,95}\.snap")
+REPO_ID = re.compile(r"[0-9a-f]{16}")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]+")
+_INVALID = "The backup destination sent an invalid reply."
+
+
+def clean_text(text, limit=300) -> str:
+    """Text from the other side, made safe to show: no control characters, bounded."""
+    text = _CONTROL.sub(" ", str(text)).strip()
+    return text if len(text) <= limit else text[:limit - 1] + "\u2026"
 
 
 class RemoteError(Exception):
@@ -31,12 +45,14 @@ class ConnectError(RemoteError):
 
 
 def _ssh_exe() -> str:
+    # Windows' own OpenSSH first (the same one scheduled runs get), then PATH.
+    from . import paths
+    system = paths.system_exe("ssh.exe")
+    if os.path.isabs(system):
+        return system
     found = shutil.which("ssh")
     if found:
         return found
-    fallback = Path(r"C:\Windows\System32\OpenSSH\ssh.exe")
-    if fallback.exists():
-        return str(fallback)
     raise ConnectError("The ssh program was not found on this PC.")
 
 
@@ -105,8 +121,13 @@ class Remote:
         host = (self.dest.get("host") or "").strip()
         if not host or host.startswith("-"):
             raise ConnectError("No backup machine is set.")
-        return [_ssh_exe(), "-T",
+        return [_ssh_exe(), "-T", "-a", "-x",
                 "-o", "BatchMode=yes",
+                # the backup computer gets no way back into this PC or its other logins
+                "-o", "ForwardAgent=no",
+                "-o", "ClearAllForwardings=yes",
+                "-o", "PermitLocalCommand=no",
+                "-o", "StrictHostKeyChecking=yes",
                 "-o", "ConnectTimeout=15",
                 "-o", "ServerAliveInterval=15",
                 "-o", "ServerAliveCountMax=4",
@@ -138,7 +159,7 @@ class Remote:
             # Skip anything a login script printed before the agent started.
             seen = 0
             while True:
-                line = self.proc.stdout.readline()
+                line = self.proc.stdout.readline(4096)
                 if line == MARKER:
                     return self
                 seen += len(line)
@@ -152,8 +173,11 @@ class Remote:
 
     def _drain_stderr(self):
         try:
-            for line in self.proc.stderr:
-                self._stderr.append(line.decode("utf-8", "replace").strip())
+            while True:
+                line = self.proc.stderr.readline(4096)
+                if not line:
+                    break
+                self._stderr.append(clean_text(line.decode("utf-8", "replace")))
         except (OSError, ValueError):
             pass
 
@@ -227,7 +251,8 @@ class Remote:
             raise RemoteError(self._failure("Lost the connection to the backup machine"))
         hdr_len = struct.unpack(">I", self._read_exact(4))[0]
         if hdr_len > MAX_HEADER:
-            raise RemoteError("The backup destination sent an invalid reply.")
+            self.kill()
+            raise RemoteError(_INVALID)
         try:
             resp = json.loads(self._read_exact(hdr_len))
             size = int(resp.get("size") or 0) if isinstance(resp, dict) else -1
@@ -235,25 +260,41 @@ class Remote:
             size = -1
         if size < 0 or size > MAX_PAYLOAD:
             self.kill()
-            raise RemoteError("The backup destination sent an invalid reply.")
+            raise RemoteError(_INVALID)
         data = self._read_exact(size) if size else b""
         if not resp.get("ok"):
-            raise RemoteError(resp.get("error") or "the backup machine reported an error")
+            raise RemoteError("The backup destination reported: "
+                              + (clean_text(resp.get("error") or "") or "an error"))
         return resp, data
+
+    def _invalid(self):
+        self.kill()
+        return RemoteError(_INVALID)
 
     # -- convenience -----------------------------------------------------
     def open(self, create: bool):
-        if self.dest.get("type") == "local":
-            return self.call("open", repo=folder_of(self.dest), create=create)[0]
-        return self.call("open", repo=self.dest.get("path") or "safekeep-repo", create=create)[0]
+        repo = folder_of(self.dest) if self.dest.get("type") == "local" else (
+            self.dest.get("path") or "safekeep-repo")
+        info = self.call("open", repo=repo, create=create)[0]
+        meta = info.get("meta")
+        if meta is not None and not (
+                isinstance(meta, dict) and isinstance(meta.get("id"), str)
+                and REPO_ID.fullmatch(meta["id"]) and isinstance(meta.get("key_check"), str)):
+            raise self._invalid()
+        return info
 
     def list_blobs(self) -> dict:
         _, data = self.call("list_blobs")
         out = {}
-        for line in data.decode("ascii").split("\n"):
-            if line:
-                name, size = line.split(" ")
-                out[name] = int(size)
+        try:
+            for line in data.decode("ascii").split("\n"):
+                if line:
+                    name, size = line.split(" ")
+                    if not BLOB_NAME.fullmatch(name):
+                        raise ValueError(name)
+                    out[name] = int(size)
+        except ValueError:
+            raise self._invalid()
         return out
 
     def put_blob(self, name: str, blob: bytes):
@@ -265,18 +306,47 @@ class Remote:
     def verify_blobs(self, names, full: bool):
         resp, _ = self.call("verify_blobs", "\n".join(names).encode("ascii"),
                             mode="full" if full else "quick")
-        return resp
+        asked, out = set(names), {}
+        for key in ("missing", "corrupt", "unreadable"):
+            got = resp.get(key) or []
+            if not isinstance(got, list) or not all(isinstance(n, str) and n in asked for n in got):
+                raise self._invalid()
+            out[key] = got
+        return out
 
     def delete_blobs(self, names) -> int:
-        return self.call("delete_blobs", "\n".join(names).encode("ascii"))[0]["deleted"]
+        names, deleted = list(names), 0
+        for i in range(0, len(names), 10000):
+            deleted += self.call("delete_blobs",
+                                 "\n".join(names[i:i + 10000]).encode("ascii"))[0]["deleted"]
+        return deleted
+
+    def quarantine_blobs(self, names) -> None:
+        names = list(names)
+        for i in range(0, len(names), 10000):
+            self.call("quarantine_blobs", "\n".join(names[i:i + 10000]).encode("ascii"))
 
     def list_snapshots(self):
-        return self.call("list_snapshots")[0]["snapshots"]
+        snaps = self.call("list_snapshots")[0].get("snapshots")
+        if not isinstance(snaps, list) or not all(
+                isinstance(s, dict) and isinstance(s.get("name"), str)
+                and SNAP_NAME.fullmatch(s["name"]) for s in snaps):
+            raise self._invalid()
+        return snaps
 
-    def put_snapshot(self, name: str, raw: bytes):
-        self.call("put_snapshot", raw, name=name, sha256=hashlib.sha256(raw).hexdigest())
+    def snapshot_hashes(self) -> dict:
+        hashes = self.call("hash_snapshots")[0].get("hashes")
+        if not isinstance(hashes, dict):
+            raise self._invalid()
+        return {n: h for n, h in hashes.items() if SNAP_NAME.fullmatch(n)}
+
+    def put_snapshot(self, name: str, raw: bytes, replace: bool = False):
+        self.call("put_snapshot", raw, name=name, sha256=hashlib.sha256(raw).hexdigest(),
+                  replace=replace)
 
     def get_snapshot(self, name: str) -> bytes:
+        if not SNAP_NAME.fullmatch(name):
+            raise RemoteError("bad snapshot name")
         return self.call("get_snapshot", name=name)[1]
 
     def delete_snapshot(self, name: str):

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "safekeep"
+description = "Small automatic, encrypted, verified backups from a Windows PC to another computer or drive"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["cryptography>=42"]
+dynamic = ["version"]
+
+[project.scripts]
+safekeep = "safekeep.__main__:main"
+
+[project.gui-scripts]
+safekeep-gui = "safekeep.gui:main"
+
+[tool.setuptools]
+packages = ["safekeep"]
+
+[tool.setuptools.dynamic]
+version = { attr = "safekeep.__version__" }
+
+[tool.setuptools.package-data]
+safekeep = ["assets/*"]
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "build", "dist"]

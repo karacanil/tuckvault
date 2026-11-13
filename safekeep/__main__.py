@@ -53,10 +53,15 @@ def main(argv=None) -> int:
     cfg = config.load()
 
     if args.cmd == "run":
+        if args.scheduled and args.only is None:
+            args.only = config.DEFAULT_GROUP  # tasks made by 1.0 carry no group
         # Two schedules can fall on the same minute: unattended runs queue up.
         result = engine.run_backup(cfg, attempts=3 if args.scheduled else 1, only=args.only,
                                    wait=2 * 3600 if args.scheduled else 0)
         if args.scheduled:
+            if result["status"] == "skipped" and "already running" in result.get("error", ""):
+                result = dict(result, status="failed", error="A scheduled backup did not run "
+                              "because another Safekeep operation was still busy after two hours.")
             notify.notify_result(result)
         return _print_result(result)
     if args.cmd == "verify":
