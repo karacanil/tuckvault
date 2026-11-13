@@ -64,20 +64,27 @@ def _excluded(path: str, name: str, patterns) -> bool:
 class _Lock:
     """One Safekeep operation at a time on this PC. Released if we crash."""
 
+    def __init__(self, wait: float = 0):
+        self.wait = wait  # seconds to wait for a running operation to finish
+
     def __enter__(self):
         self.fh = open(paths.lock_file(), "a+")
-        try:
-            if sys.platform == "win32":
-                import msvcrt
-                self.fh.seek(0)
-                msvcrt.locking(self.fh.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self.fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            self.fh.close()
-            raise AlreadyRunning("Another Safekeep backup or restore is already running.")
-        return self
+        deadline = time.monotonic() + self.wait
+        while True:
+            try:
+                if sys.platform == "win32":
+                    import msvcrt
+                    self.fh.seek(0)
+                    msvcrt.locking(self.fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except OSError:
+                if time.monotonic() >= deadline:
+                    self.fh.close()
+                    raise AlreadyRunning("Another Safekeep backup or restore is already running.")
+                time.sleep(min(5, max(0.1, self.wait / 20)))
 
     def __exit__(self, *exc):
         self.fh.close()
@@ -228,16 +235,31 @@ def _scan(sources, excludes, warnings):
 
 
 # -- backup ---------------------------------------------------------------
-def run_backup(cfg: dict = None, progress=None, attempts: int = 1) -> dict:
-    """Run one backup. Never raises: the outcome is in the returned dict."""
+def run_backup(cfg: dict = None, progress=None, attempts: int = 1,
+               only: str = None, wait: float = 0) -> dict:
+    """Run one backup. Never raises: the outcome is in the returned dict.
+
+    only: id of one group from config.groups() to back up just those items;
+    None backs up everything. wait: seconds to wait for another running
+    Safekeep operation instead of skipping.
+    """
     setup_logging()
     cfg = cfg or config.load()
     result = {"kind": "backup", "started": now_iso(), "status": "failed", "warnings": [],
               "files": 0, "bytes": 0, "uploaded_bytes": 0, "new_files": 0}
-    log.info("backup starting")
+    sources = [s for s in cfg.get("sources", []) if s]
+    if only is not None:
+        sources = next((g["sources"] for g in config.groups(cfg) if g["id"] == only), [])
+        if not sources:  # a leftover schedule for an item that is no longer listed
+            log.info("scheduled group %s has nothing to back up", only)
+            result.update(status="skipped", finished=now_iso(),
+                          error="Nothing is on this schedule any more.")
+            return result
+    result["sources"] = sources
+    log.info("backup starting (%s)", "everything" if only is None else "; ".join(sources))
     try:
-        with _Lock():
-            _backup(cfg, result, progress, attempts)
+        with _Lock(wait):
+            _backup(cfg, sources, result, progress, attempts)
     except AlreadyRunning as e:
         result.update(status="skipped", error=str(e))
     except (BackupError, RemoteError, crypto.IntegrityError) as e:
@@ -255,9 +277,13 @@ def run_backup(cfg: dict = None, progress=None, attempts: int = 1) -> dict:
     return result
 
 
-def _backup(cfg, result, progress, attempts):
+def _under(path: str, roots) -> bool:
+    p = os.path.normcase(path)
+    return any(p == r or p.startswith(r.rstrip("\\/") + os.sep) for r in roots)
+
+
+def _backup(cfg, sources, result, progress, attempts):
     warnings = result["warnings"]
-    sources = [s for s in cfg.get("sources", []) if s]
     if not sources:
         raise BackupError("Nothing is selected for backup yet.")
 
@@ -277,7 +303,10 @@ def _backup(cfg, result, progress, attempts):
         cache = config.read_json(paths.cache_file(), {})
         if cache.get("repo") != repo.id:
             cache = {"repo": repo.id, "files": {}}
-        old, new_cache = cache["files"], {}
+        # Keep what is known about items that are not part of this run.
+        roots = [os.path.normcase(os.path.abspath(s)) for s in sources]
+        old = cache["files"]
+        new_cache = {p: v for p, v in old.items() if not _under(p, roots)}
 
         entries, done = [], 0
         for path, size, mtime in files:
@@ -415,17 +444,35 @@ def _scrub(repo: Repo, progress=None):
 
 
 def _prune(repo: Repo, keep_last: int, progress=None):
-    """Drop old snapshots beyond keep_last, then delete data nothing refers to."""
+    """Drop old snapshots, then delete data nothing refers to.
+
+    The newest keep_last backups of every item are kept. Items can be on
+    different schedules, so counting per item stops a frequently backed-up
+    item from pushing out the backups of a rarely backed-up one.
+    """
     names = sorted(repo.snapshot_names())
-    if keep_last > 0 and len(names) > keep_last:
-        for old in names[:-keep_last]:
+    if keep_last > 0:
+        keep, count = set(), {}
+        for pos, name in enumerate(reversed(names)):
+            try:
+                items = repo.manifest(name).get("sources") or [""]
+            except crypto.IntegrityError:
+                if pos < keep_last:  # unreadable ones only age out
+                    keep.add(name)
+                continue
+            for item in items:
+                key = os.path.normcase(item)
+                if count.get(key, 0) < keep_last:
+                    count[key] = count.get(key, 0) + 1
+                    keep.add(name)
+        for old in [n for n in names if n not in keep]:
             repo.remote.delete_snapshot(old)
             try:
                 (paths.snapshot_cache(repo.id) / old).unlink()
             except OSError:
                 pass
             log.info("pruned snapshot %s", old)
-        names = names[-keep_last:]
+        names = [n for n in names if n in keep]
     try:
         refs = repo.referenced_blobs(names)
     except crypto.IntegrityError:

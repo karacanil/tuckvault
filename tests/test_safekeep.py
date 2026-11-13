@@ -239,6 +239,82 @@ class Retention(Base):
             self.assertEqual(res["status"], "success", res)
 
 
+class PerItemSchedules(Base):
+    def setUp(self):
+        super().setUp()
+        self.vault = self.tmp / "vault.json"
+        self.vault.write_bytes(b"vault v1")
+        self.cfg["sources"].append(str(self.vault))
+        self.cfg["source_schedules"] = {str(self.vault): {"enabled": True, "frequency": "hourly",
+                                                          "interval_hours": 1}}
+        self.vault_id = config.source_id(str(self.vault))
+
+    def test_groups(self):
+        groups = config.groups(self.cfg)
+        self.assertEqual([g["id"] for g in groups], ["default", self.vault_id])
+        self.assertEqual(groups[0]["sources"], [str(self.src)])
+        self.assertEqual(groups[1]["schedule"]["frequency"], "hourly")
+        self.assertEqual(groups[1]["schedule"]["time"], "20:00")  # missing fields are filled in
+        self.cfg["schedule"]["enabled"] = False
+        self.assertEqual([g["id"] for g in config.active_groups(self.cfg)], [self.vault_id])
+        # the id does not depend on how the path is spelled
+        self.assertEqual(config.source_id(str(self.vault).upper()), self.vault_id)
+
+    def test_scheduled_run_backs_up_only_its_items(self):
+        r = engine.run_backup(self.cfg, only=self.vault_id)
+        self.assertEqual((r["status"], r["files"]), ("success", 1), r)
+        r = engine.run_backup(self.cfg, only="default")
+        self.assertEqual((r["status"], r["files"]), ("success", 5), r)
+        snaps = engine.list_snapshots(self.cfg)
+        self.assertEqual([s["sources"] for s in snaps], [[str(self.src)], [str(self.vault)]])
+        # a full run afterwards re-reads nothing: both partial runs kept the file cache
+        r = engine.run_backup(self.cfg)
+        self.assertEqual((r["files"], r["new_files"], r["uploaded_bytes"]), (6, 0, 0), r)
+
+    def test_leftover_schedule_is_skipped_quietly(self):
+        r = engine.run_backup(self.cfg, only="0123456789")
+        self.assertEqual(r["status"], "skipped")
+        self.assertEqual(config.load_state()["history"], [])
+
+    def test_frequent_item_does_not_push_out_rare_one(self):
+        self.cfg["keep_last"] = 2
+        weekly = engine.run_backup(self.cfg, only="default")["snapshot"]
+        hourly = []
+        for i in range(5):
+            self.vault.write_bytes(b"vault v%d" % (i + 2))
+            hourly.append(engine.run_backup(self.cfg, only=self.vault_id)["snapshot"])
+        names = sorted(s["name"] for s in engine.list_snapshots(self.cfg))
+        self.assertEqual(names, sorted([weekly] + hourly[-2:]))
+        res, restored = self.restore(weekly)
+        self.assertEqual(res["status"], "success", res)
+        self.assert_same_tree(restored)
+        self.assertEqual(engine.run_verify(self.cfg)["status"], "success")
+
+    def test_second_run_waits_for_the_first(self):
+        import threading
+        import time
+        with engine._Lock():
+            self.assertEqual(engine.run_backup(self.cfg)["status"], "skipped")
+            box = {}
+            t = threading.Thread(target=lambda: box.update(r=engine.run_backup(self.cfg, wait=30)))
+            t.start()
+            time.sleep(0.5)
+            self.assertTrue(t.is_alive())
+        t.join(60)
+        self.assertEqual(box["r"]["status"], "success", box)
+
+    def test_task_per_schedule(self):
+        ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+        group = config.groups(self.cfg)[1]
+        root = ET.fromstring(scheduler.task_xml(group["schedule"], group["id"]).split("?>", 1)[1])
+        self.assertTrue(root.find("t:Actions/t:Exec/t:Arguments", ns).text.endswith("--only " + self.vault_id))
+        self.assertEqual(root.find("t:Triggers/t:TimeTrigger/t:Repetition/t:Interval", ns).text, "PT1H")
+        self.assertEqual(scheduler.task_for("default"), scheduler.task_name())
+        self.assertEqual(scheduler.task_for(self.vault_id), scheduler.task_name() + "-" + self.vault_id)
+        now = datetime(2026, 11, 9, 21, 30)
+        self.assertEqual(scheduler.next_due(self.cfg, now), datetime(2026, 11, 9, 22, 0))
+
+
 class Scheduling(unittest.TestCase):
     def test_task_xml_is_well_formed(self):
         for freq in config.FREQUENCIES:

@@ -39,6 +39,87 @@ def key_from(value: str, labels: dict) -> str:
     return next((k for k, v in labels.items() if v == value), next(iter(labels)))
 
 
+class ScheduleEditor(ttk.Frame):
+    """Frequency picker plus the detail fields that belong to the choice."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.v_freq = tk.StringVar()
+        self.v_day = tk.StringVar()
+        self.v_monthday = tk.StringVar()
+        self.v_hours = tk.StringVar()
+        self.v_hh = tk.StringVar()
+        self.v_mm = tk.StringVar()
+        self.w_freq = ttk.Combobox(self, textvariable=self.v_freq, state="readonly", width=16,
+                                   values=list(FREQ_LABELS.values()))
+        self.w_freq.pack(side="left", padx=(0, PAD))
+        self.w_freq.bind("<<ComboboxSelected>>", lambda e: self.sync())
+        d = ttk.Frame(self)
+        d.pack(side="left")
+        self.w_hours = (ttk.Label(d, text="every"),
+                        ttk.Spinbox(d, from_=1, to=24, width=4, textvariable=self.v_hours),
+                        ttk.Label(d, text="hours"))
+        self.w_day = (ttk.Label(d, text="on"),
+                      ttk.Combobox(d, textvariable=self.v_day, state="readonly", width=11,
+                                   values=list(DAY_LABELS.values())))
+        self.w_monthday = (ttk.Label(d, text="on day"),
+                           ttk.Spinbox(d, from_=1, to=28, width=4, textvariable=self.v_monthday))
+        self.w_time = (ttk.Label(d, text="at"),
+                       ttk.Spinbox(d, from_=0, to=23, width=3, format="%02.0f", textvariable=self.v_hh),
+                       ttk.Label(d, text=":"),
+                       ttk.Spinbox(d, from_=0, to=59, width=3, format="%02.0f", textvariable=self.v_mm))
+        self.enabled = True
+
+    def set(self, sched: dict):
+        self.v_freq.set(FREQ_LABELS.get(sched.get("frequency"), FREQ_LABELS["weekly"]))
+        self.v_day.set(DAY_LABELS.get(sched.get("weekday"), "Sunday"))
+        self.v_monthday.set(str(sched.get("monthday", 1)))
+        self.v_hours.set(str(sched.get("interval_hours", 6)))
+        hh, _, mm = str(sched.get("time", "20:00")).partition(":")
+        self.v_hh.set(hh.zfill(2))
+        self.v_mm.set((mm or "0").zfill(2))
+        self.sync()
+
+    def get(self) -> dict:
+        return dict(
+            frequency=key_from(self.v_freq.get(), FREQ_LABELS),
+            weekday=key_from(self.v_day.get(), DAY_LABELS),
+            monthday=_int(self.v_monthday, 1, 28, 1),
+            interval_hours=_int(self.v_hours, 1, 24, 6),
+            time=f"{_int(self.v_hh, 0, 23, 20):02d}:{_int(self.v_mm, 0, 59, 0):02d}",
+        )
+
+    def set_enabled(self, enabled: bool):
+        self.enabled = bool(enabled)
+        self.sync()
+
+    def sync(self):
+        groups = (self.w_hours, self.w_day, self.w_monthday, self.w_time)
+        for group in groups:
+            for w in group:
+                w.pack_forget()
+        freq = key_from(self.v_freq.get(), FREQ_LABELS)
+        shown = {"hourly": [self.w_hours], "daily": [self.w_time],
+                 "weekly": [self.w_day, self.w_time], "monthly": [self.w_monthday, self.w_time]}[freq]
+        for group in shown:
+            for w in group:
+                w.pack(side="left", padx=2)
+        self.w_freq.configure(state="readonly" if self.enabled else "disabled")
+        for group in groups:
+            for w in group:
+                if isinstance(w, ttk.Combobox):
+                    w.configure(state="readonly" if self.enabled else "disabled")
+                elif isinstance(w, ttk.Spinbox):
+                    w.configure(state="normal" if self.enabled else "disabled")
+
+
+def _int(var, low, high, default):
+    try:
+        return max(low, min(high, int(float(var.get()))))
+    except ValueError:
+        return default
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -87,8 +168,15 @@ class App(tk.Tk):
         box.grid(row=1, column=0, sticky="nsew")
         box.columnconfigure(0, weight=1)
         box.rowconfigure(0, weight=1)
-        self.sources = tk.Listbox(box, selectmode="extended", activestyle="none", height=6)
+        self.sources = ttk.Treeview(box, columns=("item", "often"), show="headings",
+                                    selectmode="extended", height=6)
+        self.sources.heading("item", text="File or folder", anchor="w")
+        self.sources.heading("often", text="How often", anchor="w")
+        self.sources.column("item", width=380, anchor="w", stretch=True)
+        self.sources.column("often", width=210, anchor="w", stretch=False)
         self.sources.grid(row=0, column=0, sticky="nsew")
+        self.sources.bind("<Double-1>",
+                          lambda e: self._edit_item_schedule() if self.sources.selection() else None)
         scroll = ttk.Scrollbar(box, orient="vertical", command=self.sources.yview)
         scroll.grid(row=0, column=1, sticky="ns")
         self.sources.configure(yscrollcommand=scroll.set)
@@ -97,37 +185,15 @@ class App(tk.Tk):
         ttk.Button(buttons, text="Add folder…", command=self._add_folder).pack(fill="x")
         ttk.Button(buttons, text="Add files…", command=self._add_files).pack(fill="x", pady=4)
         ttk.Button(buttons, text="Remove", command=self._remove_sources).pack(fill="x")
+        ttk.Button(buttons, text="How often…", command=self._edit_item_schedule).pack(fill="x", pady=(12, 0))
 
-        box = ttk.LabelFrame(tab, text="How often", padding=PAD)
+        box = ttk.LabelFrame(tab, text="General schedule (for every item without its own)", padding=PAD)
         box.grid(row=2, column=0, sticky="ew", pady=(PAD, 0))
         self.v_enabled = tk.BooleanVar()
-        self.v_freq = tk.StringVar()
-        self.v_day = tk.StringVar()
-        self.v_monthday = tk.StringVar()
-        self.v_hours = tk.StringVar()
-        self.v_hh = tk.StringVar()
-        self.v_mm = tk.StringVar()
         ttk.Checkbutton(box, text="Back up automatically", variable=self.v_enabled,
                         command=self._sync_schedule_widgets).pack(side="left")
-        self.w_freq = ttk.Combobox(box, textvariable=self.v_freq, state="readonly", width=16,
-                                   values=list(FREQ_LABELS.values()))
-        self.w_freq.pack(side="left", padx=(PAD * 2, PAD))
-        self.w_freq.bind("<<ComboboxSelected>>", lambda e: self._sync_schedule_widgets())
-        self.schedule_detail = ttk.Frame(box)
-        self.schedule_detail.pack(side="left")
-        d = self.schedule_detail
-        self.w_hours = (ttk.Label(d, text="every"),
-                        ttk.Spinbox(d, from_=1, to=24, width=4, textvariable=self.v_hours),
-                        ttk.Label(d, text="hours"))
-        self.w_day = (ttk.Label(d, text="on"),
-                      ttk.Combobox(d, textvariable=self.v_day, state="readonly", width=11,
-                                   values=list(DAY_LABELS.values())))
-        self.w_monthday = (ttk.Label(d, text="on day"),
-                           ttk.Spinbox(d, from_=1, to=28, width=4, textvariable=self.v_monthday))
-        self.w_time = (ttk.Label(d, text="at"),
-                       ttk.Spinbox(d, from_=0, to=23, width=3, format="%02.0f", textvariable=self.v_hh),
-                       ttk.Label(d, text=":"),
-                       ttk.Spinbox(d, from_=0, to=59, width=3, format="%02.0f", textvariable=self.v_mm))
+        self.schedule = ScheduleEditor(box)
+        self.schedule.pack(side="left", padx=(PAD * 2, 0))
 
         box = ttk.LabelFrame(tab, text="Where the backups go", padding=PAD)
         box.grid(row=3, column=0, sticky="ew", pady=(PAD, 0))
@@ -146,7 +212,7 @@ class App(tk.Tk):
         keep.grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
         ttk.Label(keep, text="Keep the last").pack(side="left")
         ttk.Spinbox(keep, from_=1, to=999, width=5, textvariable=self.v_keep).pack(side="left", padx=4)
-        ttk.Label(keep, text="backups; older ones are removed automatically").pack(side="left")
+        ttk.Label(keep, text="backups of each item; older ones are removed automatically").pack(side="left")
 
         bottom = ttk.Frame(tab)
         bottom.grid(row=4, column=0, sticky="ew", pady=(PAD, 0))
@@ -171,7 +237,7 @@ class App(tk.Tk):
         cols = ("when", "files", "size", "notes")
         self.snapshots = ttk.Treeview(tab, columns=cols, show="headings", selectmode="browse")
         for col, text, width in (("when", "Taken", 160), ("files", "Files", 80),
-                                 ("size", "Size", 100), ("notes", "Notes", 360)):
+                                 ("size", "Size", 100), ("notes", "Contains", 360)):
             self.snapshots.heading(col, text=text, anchor="w")
             self.snapshots.column(col, width=width, anchor="w", stretch=(col == "notes"))
         self.snapshots.grid(row=1, column=0, sticky="nsew", pady=PAD)
@@ -256,17 +322,11 @@ class App(tk.Tk):
     # -- settings <-> widgets ---------------------------------------------
     def _load_into_widgets(self):
         cfg, sched = self.cfg, self.cfg["schedule"]
-        self.sources.delete(0, "end")
-        for s in cfg["sources"]:
-            self.sources.insert("end", s)
+        self.sources.delete(*self.sources.get_children())
+        for path in cfg["sources"]:
+            self.sources.insert("", "end", values=(path, self._often_label(path)))
         self.v_enabled.set(bool(sched.get("enabled")))
-        self.v_freq.set(FREQ_LABELS.get(sched.get("frequency"), FREQ_LABELS["weekly"]))
-        self.v_day.set(DAY_LABELS.get(sched.get("weekday"), "Sunday"))
-        self.v_monthday.set(str(sched.get("monthday", 1)))
-        self.v_hours.set(str(sched.get("interval_hours", 6)))
-        hh, _, mm = str(sched.get("time", "20:00")).partition(":")
-        self.v_hh.set(hh.zfill(2))
-        self.v_mm.set((mm or "0").zfill(2))
+        self.schedule.set(sched)
         self.v_host.set(cfg["destination"].get("host", ""))
         self.v_path.set(cfg["destination"].get("path", ""))
         self.v_keep.set(str(cfg.get("keep_last", 30)))
@@ -275,17 +335,16 @@ class App(tk.Tk):
         self._sync_key_banner()
 
     def _sync_schedule_widgets(self):
-        for group in (self.w_hours, self.w_day, self.w_monthday, self.w_time):
-            for w in group:
-                w.pack_forget()
-        freq = key_from(self.v_freq.get(), FREQ_LABELS)
-        shown = {"hourly": [self.w_hours], "daily": [self.w_time],
-                 "weekly": [self.w_day, self.w_time], "monthly": [self.w_monthday, self.w_time]}[freq]
-        for group in shown:
-            for w in group:
-                w.pack(side="left", padx=2)
-        state = "readonly" if self.v_enabled.get() else "disabled"
-        self.w_freq.configure(state=state)
+        self.schedule.set_enabled(self.v_enabled.get())
+
+    def _source_paths(self) -> list:
+        return [self.sources.set(i, "item") for i in self.sources.get_children()]
+
+    def _often_label(self, path: str) -> str:
+        own = config.own_schedule(self.cfg, path)
+        if own is None:
+            return "General schedule"
+        return scheduler.describe(own) if own.get("enabled") else "Only with Back up now"
 
     def _sync_key_banner(self):
         if keystore.load() is not None and not self.cfg.get("recovery_key_saved"):
@@ -293,26 +352,12 @@ class App(tk.Tk):
         else:
             self.key_banner.grid_forget()
 
-    @staticmethod
-    def _int(var, low, high, default):
-        try:
-            return max(low, min(high, int(float(var.get()))))
-        except ValueError:
-            return default
-
     def _collect(self) -> dict:
         cfg = self.cfg
-        cfg["sources"] = list(self.sources.get(0, "end"))
+        cfg["sources"] = self._source_paths()
         cfg["destination"].update(host=self.v_host.get().strip(), path=self.v_path.get().strip())
-        cfg["keep_last"] = self._int(self.v_keep, 1, 999, 30)
-        cfg["schedule"].update(
-            enabled=bool(self.v_enabled.get()),
-            frequency=key_from(self.v_freq.get(), FREQ_LABELS),
-            weekday=key_from(self.v_day.get(), DAY_LABELS),
-            monthday=self._int(self.v_monthday, 1, 28, 1),
-            interval_hours=self._int(self.v_hours, 1, 24, 6),
-            time=f"{self._int(self.v_hh, 0, 23, 20):02d}:{self._int(self.v_mm, 0, 59, 0):02d}",
-        )
+        cfg["keep_last"] = _int(self.v_keep, 1, 999, 30)
+        cfg["schedule"].update(self.schedule.get(), enabled=bool(self.v_enabled.get()))
         return cfg
 
     def _save(self, quiet=False) -> bool:
@@ -322,7 +367,7 @@ class App(tk.Tk):
             return False
         config.save(cfg)
         try:
-            scheduler.apply(cfg["schedule"])
+            scheduler.apply(cfg)
         except OSError as e:
             messagebox.showerror("Safekeep", f"Settings were saved, but the automatic schedule "
                                              f"could not be set.\n\n{e}")
@@ -330,16 +375,23 @@ class App(tk.Tk):
         self._load_into_widgets()
         self._refresh_summary()
         if not quiet:
-            self.status.configure(text="Settings saved. " + scheduler.describe(cfg["schedule"]) + ".")
+            active = config.active_groups(cfg)
+            if not active:
+                what = "Automatic backups are off"
+            elif len(active) == 1:
+                what = scheduler.describe(active[0]["schedule"])
+            else:
+                what = f"{len(active)} automatic schedules are active"
+            self.status.configure(text=f"Settings saved. {what}.")
         return True
 
     # -- sources ---------------------------------------------------------
     def _add_paths(self, new_paths):
-        have = {os.path.normcase(p) for p in self.sources.get(0, "end")}
+        have = {os.path.normcase(p) for p in self._source_paths()}
         for p in new_paths:
             p = os.path.normpath(p)
             if os.path.normcase(p) not in have:
-                self.sources.insert("end", p)
+                self.sources.insert("", "end", values=(p, self._often_label(p)))
                 have.add(os.path.normcase(p))
 
     def _add_folder(self):
@@ -351,8 +403,72 @@ class App(tk.Tk):
         self._add_paths(filedialog.askopenfilenames(parent=self, title="Choose files to back up"))
 
     def _remove_sources(self):
-        for i in reversed(self.sources.curselection()):
-            self.sources.delete(i)
+        self.sources.delete(*self.sources.selection())
+
+    def _set_item_schedule(self, item_paths, sched):
+        """sched: a schedule dict, or None to follow the general schedule."""
+        table = self.cfg.setdefault("source_schedules", {})
+        want = {os.path.normcase(os.path.abspath(p)) for p in item_paths}
+        for key in [k for k in table if os.path.normcase(os.path.abspath(k)) in want]:
+            del table[key]
+        if sched is not None:
+            for p in item_paths:
+                table[p] = dict(sched)
+        for iid in self.sources.get_children():
+            path = self.sources.set(iid, "item")
+            self.sources.set(iid, "often", self._often_label(path))
+        self.status.configure(text="Click Save settings to apply the new schedule.")
+
+    def _edit_item_schedule(self):
+        chosen = [self.sources.set(i, "item") for i in self.sources.selection()]
+        if not chosen:
+            messagebox.showinfo("Safekeep", "Select one or more items in the list first.")
+            return
+        current = config.own_schedule(self.cfg, chosen[0])
+        dialog = tk.Toplevel(self)
+        dialog.title("How often")
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        frame = ttk.Frame(dialog, padding=PAD * 2)
+        frame.pack(fill="both", expand=True)
+        title = chosen[0] if len(chosen) == 1 else f"{len(chosen)} selected items"
+        ttk.Label(frame, text=title, wraplength=460, justify="left",
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, PAD))
+        mode = tk.StringVar(value="general" if current is None
+                            else ("own" if current.get("enabled") else "manual"))
+        editor = ScheduleEditor(frame)
+        editor.set(current or self.cfg["schedule"])
+
+        def sync():
+            editor.set_enabled(mode.get() == "own")
+
+        general = scheduler.describe(dict(self.cfg["schedule"], **self.schedule.get(),
+                                          enabled=bool(self.v_enabled.get())))
+        general = general[0].lower() + general[1:]
+        ttk.Radiobutton(frame, text=f"Follow the general schedule ({general})",
+                        variable=mode, value="general", command=sync).pack(anchor="w")
+        ttk.Radiobutton(frame, text="Its own schedule:", variable=mode, value="own",
+                        command=sync).pack(anchor="w", pady=(4, 0))
+        editor.pack(anchor="w", padx=(PAD * 3, 0), pady=4)
+        ttk.Radiobutton(frame, text="Never automatically, only with Back up now",
+                        variable=mode, value="manual", command=sync).pack(anchor="w")
+        sync()
+
+        def ok():
+            sched = {"general": None,
+                     "own": dict(editor.get(), enabled=True),
+                     "manual": dict(editor.get(), enabled=False)}[mode.get()]
+            dialog.destroy()
+            self._set_item_schedule(chosen, sched)
+
+        row = ttk.Frame(frame)
+        row.pack(anchor="e", pady=(PAD * 2, 0))
+        ttk.Button(row, text="OK", command=ok).pack(side="left", padx=PAD)
+        ttk.Button(row, text="Cancel", command=dialog.destroy).pack(side="left")
+        dialog.bind("<Return>", lambda e: ok())
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+        dialog.grab_set()
+        self._item_dialog = (dialog, mode, editor, ok)  # reachable for tests
 
     # -- summaries -------------------------------------------------------
     def _refresh_summary(self):
@@ -361,10 +477,10 @@ class App(tk.Tk):
         lines = ["Last successful backup: " + local_time(state.get("last_success"))]
         if last and last.get("kind") == "backup" and last.get("status") == "failed":
             lines.append("Last attempt failed: " + local_time(last.get("finished")))
-        nxt = scheduler.next_run(self.cfg["schedule"])
-        if nxt and scheduler.is_installed():
+        nxt = scheduler.next_due(self.cfg)
+        if nxt and scheduler.is_active(self.cfg):
             lines.append("Next automatic backup: " + nxt.strftime("%d %b %Y %H:%M"))
-        elif self.cfg["schedule"].get("enabled"):
+        elif nxt:
             lines.append("Automatic backups are not active yet. Click Save settings.")
         else:
             lines.append("Automatic backups are off.")
@@ -510,7 +626,9 @@ class App(tk.Tk):
                 if "error" in s:
                     values = (s["name"][:15], "", "", "Unreadable: " + s["error"])
                 else:
-                    notes = f"{s['warnings']} files had problems" if s["warnings"] else ""
+                    notes = ", ".join(os.path.basename(p.rstrip("\\/")) or p for p in s.get("sources", []))
+                    if s["warnings"]:
+                        notes += f"  ({s['warnings']} files had problems)"
                     values = (local_time(s["created"]), s["files"], human_size(s["bytes"]), notes)
                 self.snapshots.insert("", "end", iid=s["name"], values=values)
             self.status.configure(text=f"{len(snaps)} backups on the backup machine.")

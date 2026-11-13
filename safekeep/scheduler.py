@@ -1,10 +1,13 @@
 """Automatic runs through Windows Task Scheduler.
 
 Nothing of Safekeep stays running between backups: Windows starts
-`pythonw -m safekeep run --scheduled` at the chosen times, and starts it
-as soon as possible afterwards if the PC was off at that moment.
+`pythonw -m safekeep run --scheduled --only <group>` at the chosen times,
+and starts it as soon as possible afterwards if the PC was off at that
+moment. There is one task for the items on the general schedule and one
+for each item that has a schedule of its own.
 """
 
+import csv
 import os
 import subprocess
 import sys
@@ -13,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from . import paths
+from . import config, paths
 from .config import WEEKDAYS
 
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
@@ -26,6 +29,11 @@ _EPOCH = datetime(2025, 1, 1)
 
 def task_name() -> str:
     return os.environ.get("SAFEKEEP_TASK_NAME", r"Safekeep\Backup")
+
+
+def task_for(group_id: str) -> str:
+    """Task Scheduler name for one group from config.groups()."""
+    return task_name() if group_id == config.DEFAULT_GROUP else f"{task_name()}-{group_id}"
 
 
 def _hm(schedule: dict):
@@ -114,8 +122,9 @@ def _runner():
     return str(pythonw if pythonw.exists() else exe), "-m safekeep run --scheduled", str(paths.project_root())
 
 
-def task_xml(schedule: dict) -> str:
+def task_xml(schedule: dict, group_id: str = config.DEFAULT_GROUP) -> str:
     command, arguments, workdir = _runner()
+    arguments += " --only " + group_id
     user = os.environ.get("USERNAME", "")
     domain = os.environ.get("USERDOMAIN", "")
     user_id = f"{domain}\\{user}" if domain else user
@@ -160,32 +169,55 @@ def _schtasks(*args):
                           errors="replace", creationflags=_NO_WINDOW)
 
 
-def is_installed() -> bool:
+def installed() -> set:
+    """Names of the Safekeep backup tasks Windows currently has."""
     if sys.platform != "win32":
-        return False
-    return _schtasks("/Query", "/TN", task_name()).returncode == 0
+        return set()
+    res = _schtasks("/Query", "/FO", "CSV", "/NH")
+    base, found = "\\" + task_name(), set()
+    for row in csv.reader(res.stdout.splitlines()):
+        if row and (row[0] == base or row[0].startswith(base + "-")):
+            found.add(row[0][1:])
+    return found
+
+
+def is_active(cfg: dict) -> bool:
+    """True if every schedule in the settings is registered with Windows."""
+    wanted = {task_for(g["id"]) for g in config.active_groups(cfg)}
+    return bool(wanted) and wanted <= installed()
+
+
+def next_due(cfg: dict, now: datetime = None):
+    """The earliest upcoming automatic backup over all schedules, or None."""
+    times = [next_run(g["schedule"], now) for g in config.active_groups(cfg)]
+    return min(times) if times else None
+
+
+def _delete(name: str) -> None:
+    res = _schtasks("/Delete", "/TN", name, "/F")
+    if res.returncode != 0:
+        raise OSError("Windows refused to remove the scheduled backup: " + res.stderr.strip())
 
 
 def remove() -> None:
-    if is_installed():
-        res = _schtasks("/Delete", "/TN", task_name(), "/F")
-        if res.returncode != 0:
-            raise OSError("Windows refused to remove the scheduled backup: " + res.stderr.strip())
+    for name in installed():
+        _delete(name)
 
 
-def apply(schedule: dict) -> None:
-    """Make Windows Task Scheduler match the schedule in the settings."""
+def apply(cfg: dict) -> None:
+    """Make Windows Task Scheduler match the schedules in the settings."""
     if sys.platform != "win32":
         raise OSError("Automatic scheduling is only implemented for Windows.")
-    if not schedule.get("enabled"):
-        remove()
-        return
-    fd, tmp = tempfile.mkstemp(suffix=".xml")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-16") as f:
-            f.write(task_xml(schedule))
-        res = _schtasks("/Create", "/TN", task_name(), "/XML", tmp, "/F")
-    finally:
-        os.remove(tmp)
-    if res.returncode != 0:
-        raise OSError("Windows refused to schedule the backup: " + (res.stderr or res.stdout).strip())
+    wanted = {task_for(g["id"]): g for g in config.active_groups(cfg)}
+    for name in installed() - set(wanted):
+        _delete(name)
+    for name, group in wanted.items():
+        fd, tmp = tempfile.mkstemp(suffix=".xml")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-16") as f:
+                f.write(task_xml(group["schedule"], group["id"]))
+            res = _schtasks("/Create", "/TN", name, "/XML", tmp, "/F")
+        finally:
+            os.remove(tmp)
+        if res.returncode != 0:
+            raise OSError("Windows refused to schedule the backup: " + (res.stderr or res.stdout).strip())

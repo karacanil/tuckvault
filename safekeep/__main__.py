@@ -29,6 +29,8 @@ def main(argv=None) -> int:
     run = sub.add_parser("run", help="back up now")
     run.add_argument("--scheduled", action="store_true",
                      help="unattended run: retry the connection and notify on failure")
+    run.add_argument("--only", metavar="GROUP",
+                     help="back up only the items on one schedule (used by the scheduled tasks)")
     sub.add_parser("verify", help="re-check every stored piece of every backup")
     sub.add_parser("snapshots", help="list the backups at the destination")
     restore = sub.add_parser("restore", help="restore a backup into a folder")
@@ -51,7 +53,9 @@ def main(argv=None) -> int:
     cfg = config.load()
 
     if args.cmd == "run":
-        result = engine.run_backup(cfg, attempts=3 if args.scheduled else 1)
+        # Two schedules can fall on the same minute: unattended runs queue up.
+        result = engine.run_backup(cfg, attempts=3 if args.scheduled else 1, only=args.only,
+                                   wait=2 * 3600 if args.scheduled else 0)
         if args.scheduled:
             notify.notify_result(result)
         return _print_result(result)
@@ -83,10 +87,14 @@ def main(argv=None) -> int:
         return 0
     if args.cmd == "schedule":
         if args.action == "apply":
-            scheduler.apply(cfg["schedule"])
+            scheduler.apply(cfg)
         elif args.action == "remove":
             scheduler.remove()
-        _out(f"{scheduler.describe(cfg['schedule'])}; task installed: {scheduler.is_installed()}")
+        installed = scheduler.installed()
+        for g in config.groups(cfg):
+            if g["sources"]:
+                state = "installed" if scheduler.task_for(g["id"]) in installed else "not installed"
+                _out(f"{scheduler.describe(g['schedule'])} ({state}): {'; '.join(g['sources'])}")
         return 0
     if args.cmd == "key":
         if args.action == "show":

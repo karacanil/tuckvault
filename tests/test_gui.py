@@ -89,16 +89,17 @@ class GuiFlow(unittest.TestCase):
     def test_schedule_widgets_follow_frequency(self):
         app = self.app
         app.v_enabled.set(True)
-        for freq, visible in (("hourly", app.w_hours), ("weekly", app.w_day), ("monthly", app.w_monthday)):
-            app.v_freq.set(gui.FREQ_LABELS[freq])
+        ed = app.schedule
+        for freq, visible in (("hourly", ed.w_hours), ("weekly", ed.w_day), ("monthly", ed.w_monthday)):
+            ed.v_freq.set(gui.FREQ_LABELS[freq])
             app._sync_schedule_widgets()
             app.update()
             self.assertTrue(visible[1].winfo_ismapped(), freq)
-            self.assertEqual(app.w_time[1].winfo_ismapped(), freq != "hourly")
-        app.v_freq.set(gui.FREQ_LABELS["weekly"])
-        app.v_day.set("Wednesday")
-        app.v_hh.set("07")
-        app.v_mm.set("5")
+            self.assertEqual(ed.w_time[1].winfo_ismapped(), freq != "hourly")
+        ed.v_freq.set(gui.FREQ_LABELS["weekly"])
+        ed.v_day.set("Wednesday")
+        ed.v_hh.set("07")
+        ed.v_mm.set("5")
         sched = app._collect()["schedule"]
         self.assertEqual((sched["frequency"], sched["weekday"], sched["time"]), ("weekly", "WED", "07:05"))
 
@@ -110,7 +111,7 @@ class GuiFlow(unittest.TestCase):
 
         app._add_paths([str(self.src)])
         app._add_paths([str(self.src)])  # duplicates are ignored
-        self.assertEqual(app.sources.size(), 1)
+        self.assertEqual(len(app.sources.get_children()), 1)
         self.dialogs.clear()
         app._backup_now()
         self.assertTrue(app.busy)
@@ -158,6 +159,52 @@ class GuiFlow(unittest.TestCase):
         app._key_saved_changed()
         self.assertTrue(config.load()["recovery_key_saved"])
         self.assertEqual(app.key_banner.winfo_manager(), "")
+
+    def test_item_can_have_its_own_schedule(self):
+        app = self.app
+        other = self.tmp / "vault.kdbx"
+        other.write_bytes(b"x")
+        app._add_paths([str(self.src), str(other)])
+        rows = app.sources.get_children()
+        self.assertEqual(app.sources.set(rows[1], "often"), "General schedule")
+
+        app._edit_item_schedule()  # nothing selected
+        self.assertEqual(self.dialogs[-1][0], "showinfo")
+
+        app.sources.selection_set(rows[1])
+        app._edit_item_schedule()
+        dialog, mode, editor, ok = app._item_dialog
+        app.update()
+        self.assertEqual(mode.get(), "general")
+        mode.set("own")
+        editor.v_freq.set(gui.FREQ_LABELS["daily"])
+        editor.v_hh.set("09")
+        editor.v_mm.set("30")
+        ok()
+        self.assertEqual(app.sources.set(rows[1], "often"), "Every day at 09:30")
+        self.assertEqual(app.sources.set(rows[0], "often"), "General schedule")
+
+        cfg = app._collect()
+        groups = config.groups(cfg)
+        self.assertEqual([g["sources"] for g in groups], [[str(self.src)], [str(other)]])
+        self.assertEqual((groups[1]["schedule"]["frequency"], groups[1]["schedule"]["time"]), ("daily", "09:30"))
+
+        # reopening shows the stored choice; "manual" switches automatic runs off for it
+        app._edit_item_schedule()
+        dialog, mode, editor, ok = app._item_dialog
+        self.assertEqual(mode.get(), "own")
+        mode.set("manual")
+        ok()
+        self.assertEqual(app.sources.set(rows[1], "often"), "Only with Back up now")
+        self.assertEqual(config.active_groups(app._collect()), [])
+
+        # removing the item drops its schedule on save
+        config.save(app._collect())
+        self.assertIn(str(other), config.load()["source_schedules"])
+        app.sources.selection_set(rows[1])
+        app._remove_sources()
+        config.save(app._collect())
+        self.assertEqual(config.load()["source_schedules"], {})
 
     def test_unreachable_machine_shows_an_error(self):
         app = self.app
