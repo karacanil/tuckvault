@@ -178,7 +178,7 @@ def _connect(cfg, create, attempts=1, wait=20, progress=None) -> Repo:
     last = None
     for i in range(attempts):
         if i:
-            _progress(progress, "connect", 0, 0, f"Backup machine not reachable, retry {i + 1}…")
+            _progress(progress, "connect", 0, 0, f"Backup destination not reachable, retry {i + 1}…")
             time.sleep(wait)
         try:
             return Repo(cfg, create=create)
@@ -303,7 +303,7 @@ def _backup(cfg, sources, result, progress, attempts):
                           + (warnings[0] if warnings else ""))
     total_bytes = sum(f[1] for f in files)
 
-    _progress(progress, "connect", 0, 0, "Connecting to the backup machine…")
+    _progress(progress, "connect", 0, 0, "Connecting to the backup destination…")
     with _connect(cfg, create=True, attempts=attempts, progress=progress) as repo:
         remote, keys = repo.remote, repo.keys
         blobs = remote.list_blobs()
@@ -502,7 +502,7 @@ def run_verify(cfg: dict = None, progress=None) -> dict:
     result = {"kind": "verify", "started": now_iso(), "status": "failed", "warnings": []}
     try:
         with _Lock():
-            _progress(progress, "connect", 0, 0, "Connecting to the backup machine…")
+            _progress(progress, "connect", 0, 0, "Connecting to the backup destination…")
             with _connect(cfg, create=False) as repo:
                 problem = _scrub(repo, progress)
                 result["snapshots"] = len(repo.snapshot_names())
@@ -554,7 +554,7 @@ def run_restore(snapshot: str, dest: str, cfg: dict = None, progress=None) -> di
               "files": 0, "bytes": 0, "snapshot": snapshot, "dest": dest}
     try:
         with _Lock():
-            _progress(progress, "connect", 0, 0, "Connecting to the backup machine…")
+            _progress(progress, "connect", 0, 0, "Connecting to the backup destination…")
             with _connect(cfg, create=False) as repo:
                 manifest = repo.manifest(snapshot)
                 total = manifest["stats"]["bytes"]

@@ -49,3 +49,7 @@ def snapshot_cache(repo_id: str) -> Path:
 
 def project_root() -> Path:
     return Path(__file__).resolve().parent.parent
+
+
+def icon_file() -> Path:
+    return Path(__file__).resolve().parent / "assets" / "safekeep.ico"

@@ -131,6 +131,10 @@ class App(tk.Tk):
             ttk.Style(self).theme_use("vista")
         except tk.TclError:
             pass
+        try:  # window, Alt-Tab and taskbar icon; dialogs inherit it
+            self.iconbitmap(default=str(paths.icon_file()))
+        except tk.TclError:
+            pass
         self.cfg = config.load()
         self.events = queue.Queue()
         self.busy = False
@@ -226,8 +230,8 @@ class App(tk.Tk):
         ttk.Entry(self.dest_local, textvariable=self.v_folder).grid(row=0, column=1, sticky="ew", padx=PAD)
         ttk.Button(self.dest_local, text="Browse…", command=self._browse_folder).grid(row=0, column=2)
         ttk.Label(self.dest_local, foreground="#555",
-                  text="For example a USB disk, a network share, or a folder that a cloud service "
-                       "syncs. Everything stored there is encrypted.").grid(
+                  text="A USB disk, a network share or a cloud-synced folder. "
+                       "Everything stored there is encrypted.").grid(
             row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
         keep = ttk.Frame(box)
         keep.grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
@@ -252,7 +256,7 @@ class App(tk.Tk):
         self.notebook.add(tab, text="  Restore  ")
         tab.columnconfigure(0, weight=1)
         tab.rowconfigure(1, weight=1)
-        ttk.Label(tab, text="Backups stored on the backup machine. Restoring copies a whole backup "
+        ttk.Label(tab, text="Backups stored at the backup destination. Restoring copies a whole backup "
                             "into a folder you choose; nothing is overwritten in place.",
                   wraplength=740, justify="left").grid(row=0, column=0, columnspan=2, sticky="w")
         cols = ("when", "files", "size", "notes")
@@ -675,7 +679,7 @@ class App(tk.Tk):
                         notes += f"  ({s['warnings']} files had problems)"
                     values = (local_time(s["created"]), s["files"], human_size(s["bytes"]), notes)
                 self.snapshots.insert("", "end", iid=s["name"], values=values)
-            self.status.configure(text=f"{len(snaps)} backups on the backup machine.")
+            self.status.configure(text=f"{len(snaps)} backups at the backup destination.")
 
         self._start(lambda progress: engine.list_snapshots(cfg), done)
 
@@ -780,9 +784,11 @@ class App(tk.Tk):
 
 def main():
     engine.setup_logging()
-    try:  # crisp text on high-DPI screens
+    try:
         import ctypes
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        # Own taskbar identity, so Windows shows our icon and not Python's.
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Safekeep.Backup")
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # crisp text on high-DPI screens
     except Exception:
         pass
     App().mainloop()
