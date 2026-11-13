@@ -160,6 +160,20 @@ class GuiFlow(unittest.TestCase):
         self.assertTrue(config.load()["recovery_key_saved"])
         self.assertEqual(app.key_banner.winfo_manager(), "")
 
+    def test_folder_destination(self):
+        app = self.app
+        self.assertEqual(app.v_dest.get(), gui.DEST_LABELS["local"])
+        self.assertTrue(app.dest_local.winfo_ismapped())
+        self.assertEqual(app.v_folder.get(), str(self.tmp / "repo"))
+        dest = app._collect()["destination"]
+        self.assertEqual((dest["type"], dest["folder"]), ("local", str(self.tmp / "repo")))
+        with mock.patch.object(gui.filedialog, "askdirectory", return_value=str(self.tmp / "usb")):
+            app._browse_folder()
+        self.assertEqual(app._collect()["destination"]["folder"], str(self.tmp / "usb"))
+        app.v_folder.set("")
+        self.assertFalse(app._save())
+        self.assertEqual(self.dialogs[-1][0], "showwarning")
+
     def test_item_can_have_its_own_schedule(self):
         app = self.app
         other = self.tmp / "vault.kdbx"
@@ -208,7 +222,11 @@ class GuiFlow(unittest.TestCase):
 
     def test_unreachable_machine_shows_an_error(self):
         app = self.app
-        app.cfg["destination"]["type"] = "ssh"
+        app.v_dest.set(gui.DEST_LABELS["ssh"])
+        app._sync_destination_widgets()
+        app.update()
+        self.assertTrue(app.dest_ssh.winfo_ismapped())
+        self.assertFalse(app.dest_local.winfo_ismapped())
         app.v_host.set("-nonexistent")
         app._test_connection()
         self.wait_idle()

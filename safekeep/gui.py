@@ -13,6 +13,7 @@ FREQ_LABELS = {"hourly": "Every few hours", "daily": "Every day",
                "weekly": "Every week", "monthly": "Every month"}
 DAY_LABELS = {"MON": "Monday", "TUE": "Tuesday", "WED": "Wednesday", "THU": "Thursday",
               "FRI": "Friday", "SAT": "Saturday", "SUN": "Sunday"}
+DEST_LABELS = {"ssh": "Another computer (over SSH)", "local": "A folder or drive"}
 STATUS_LABELS = {"success": "OK", "warning": "Finished with problems", "failed": "Failed",
                  "skipped": "Skipped"}
 KIND_LABELS = {"backup": "Backup", "verify": "Check", "restore": "Restore"}
@@ -198,18 +199,38 @@ class App(tk.Tk):
         box = ttk.LabelFrame(tab, text="Where the backups go", padding=PAD)
         box.grid(row=3, column=0, sticky="ew", pady=(PAD, 0))
         box.columnconfigure(1, weight=1)
+        self.v_dest = tk.StringVar()
         self.v_host = tk.StringVar()
         self.v_path = tk.StringVar()
+        self.v_folder = tk.StringVar()
         self.v_keep = tk.StringVar()
-        ttk.Label(box, text="Backup machine (SSH name)").grid(row=0, column=0, sticky="w")
-        ttk.Entry(box, textvariable=self.v_host).grid(row=0, column=1, sticky="ew", padx=PAD)
+        ttk.Label(box, text="Send backups to").grid(row=0, column=0, sticky="w")
+        w = ttk.Combobox(box, textvariable=self.v_dest, state="readonly", width=30,
+                         values=list(DEST_LABELS.values()))
+        w.grid(row=0, column=1, sticky="w", padx=PAD)
+        w.bind("<<ComboboxSelected>>", lambda e: self._sync_destination_widgets())
         b = ttk.Button(box, text="Test connection", command=self._test_connection)
         b.grid(row=0, column=2)
         self.action_buttons.append(b)
-        ttk.Label(box, text="Folder on that machine").grid(row=1, column=0, sticky="w", pady=(4, 0))
-        ttk.Entry(box, textvariable=self.v_path).grid(row=1, column=1, sticky="ew", padx=PAD, pady=(4, 0))
+
+        self.dest_ssh = ttk.Frame(box)
+        self.dest_ssh.columnconfigure(1, weight=1)
+        ttk.Label(self.dest_ssh, text="Computer (SSH name)").grid(row=0, column=0, sticky="w")
+        ttk.Entry(self.dest_ssh, textvariable=self.v_host).grid(row=0, column=1, sticky="ew", padx=PAD)
+        ttk.Label(self.dest_ssh, text="Folder on that computer").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Entry(self.dest_ssh, textvariable=self.v_path).grid(row=1, column=1, sticky="ew", padx=PAD,
+                                                                pady=(4, 0))
+        self.dest_local = ttk.Frame(box)
+        self.dest_local.columnconfigure(1, weight=1)
+        ttk.Label(self.dest_local, text="Folder").grid(row=0, column=0, sticky="w")
+        ttk.Entry(self.dest_local, textvariable=self.v_folder).grid(row=0, column=1, sticky="ew", padx=PAD)
+        ttk.Button(self.dest_local, text="Browse…", command=self._browse_folder).grid(row=0, column=2)
+        ttk.Label(self.dest_local, foreground="#555",
+                  text="For example a USB disk, a network share, or a folder that a cloud service "
+                       "syncs. Everything stored there is encrypted.").grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
         keep = ttk.Frame(box)
-        keep.grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        keep.grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
         ttk.Label(keep, text="Keep the last").pack(side="left")
         ttk.Spinbox(keep, from_=1, to=999, width=5, textvariable=self.v_keep).pack(side="left", padx=4)
         ttk.Label(keep, text="backups of each item; older ones are removed automatically").pack(side="left")
@@ -327,8 +348,13 @@ class App(tk.Tk):
             self.sources.insert("", "end", values=(path, self._often_label(path)))
         self.v_enabled.set(bool(sched.get("enabled")))
         self.schedule.set(sched)
-        self.v_host.set(cfg["destination"].get("host", ""))
-        self.v_path.set(cfg["destination"].get("path", ""))
+        dest = cfg["destination"]
+        local = dest.get("type") == "local"
+        self.v_dest.set(DEST_LABELS["local" if local else "ssh"])
+        self.v_host.set(dest.get("host", ""))
+        self.v_folder.set(dest.get("folder") or (dest.get("path", "") if local else ""))
+        self.v_path.set("safekeep-repo" if local and not dest.get("folder") else dest.get("path", ""))
+        self._sync_destination_widgets()
         self.v_keep.set(str(cfg.get("keep_last", 30)))
         self.v_key_saved.set(bool(cfg.get("recovery_key_saved")))
         self._sync_schedule_widgets()
@@ -336,6 +362,17 @@ class App(tk.Tk):
 
     def _sync_schedule_widgets(self):
         self.schedule.set_enabled(self.v_enabled.get())
+
+    def _sync_destination_widgets(self):
+        local = key_from(self.v_dest.get(), DEST_LABELS) == "local"
+        show, hide = (self.dest_local, self.dest_ssh) if local else (self.dest_ssh, self.dest_local)
+        hide.grid_forget()
+        show.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+
+    def _browse_folder(self):
+        path = filedialog.askdirectory(parent=self, title="Choose the folder that will hold the backups")
+        if path:
+            self.v_folder.set(os.path.normpath(path))
 
     def _source_paths(self) -> list:
         return [self.sources.set(i, "item") for i in self.sources.get_children()]
@@ -355,15 +392,22 @@ class App(tk.Tk):
     def _collect(self) -> dict:
         cfg = self.cfg
         cfg["sources"] = self._source_paths()
-        cfg["destination"].update(host=self.v_host.get().strip(), path=self.v_path.get().strip())
+        cfg["destination"].update(type=key_from(self.v_dest.get(), DEST_LABELS),
+                                  host=self.v_host.get().strip(),
+                                  path=self.v_path.get().strip() or "safekeep-repo",
+                                  folder=self.v_folder.get().strip())
         cfg["keep_last"] = _int(self.v_keep, 1, 999, 30)
         cfg["schedule"].update(self.schedule.get(), enabled=bool(self.v_enabled.get()))
         return cfg
 
     def _save(self, quiet=False) -> bool:
         cfg = self._collect()
-        if not cfg["destination"]["host"] and cfg["destination"].get("type") != "local":
-            messagebox.showwarning("Safekeep", "Enter the SSH name of the backup machine.")
+        dest = cfg["destination"]
+        if dest["type"] == "local" and not dest["folder"]:
+            messagebox.showwarning("Safekeep", "Choose the folder that will hold the backups.")
+            return False
+        if dest["type"] != "local" and not dest["host"]:
+            messagebox.showwarning("Safekeep", "Enter the SSH name of the backup computer.")
             return False
         config.save(cfg)
         try:

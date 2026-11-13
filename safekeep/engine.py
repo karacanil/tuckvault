@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timezone
 
 from . import config, crypto, keystore, paths
-from .remote import ConnectError, Remote, RemoteError
+from .remote import ConnectError, Remote, RemoteError, folder_of
 
 CHUNK = 4 * 1024 * 1024
 VERIFY_BATCH = 200
@@ -189,8 +189,12 @@ def _connect(cfg, create, attempts=1, wait=20, progress=None) -> Repo:
 
 
 # -- scanning -------------------------------------------------------------
-def _scan(sources, excludes, warnings):
-    """Return [(path, size, mtime_ns)] for every file under the sources."""
+def _scan(sources, excludes, warnings, skip_dirs=()):
+    """Return [(path, size, mtime_ns)] for every file under the sources.
+
+    skip_dirs: normalised folders never to enter (the backup folder itself,
+    when it lies inside something that is being backed up).
+    """
     files, seen = [], set()
 
     def add(path, st):
@@ -212,6 +216,8 @@ def _scan(sources, excludes, warnings):
         stack = [src]
         while stack:
             folder = stack.pop()
+            if os.path.normcase(folder) in skip_dirs:
+                continue
             try:
                 entries = sorted(os.scandir(_lp(folder)), key=lambda e: e.name.lower())
             except OSError as e:
@@ -288,7 +294,10 @@ def _backup(cfg, sources, result, progress, attempts):
         raise BackupError("Nothing is selected for backup yet.")
 
     _progress(progress, "scan", 0, 0, "Looking for files…")
-    files = _scan(sources, cfg.get("excludes", []), warnings)
+    dest, skip = cfg["destination"], ()
+    if dest.get("type") == "local" and folder_of(dest):
+        skip = (os.path.normcase(os.path.abspath(folder_of(dest))),)
+    files = _scan(sources, cfg.get("excludes", []), warnings, skip)
     if not files:
         raise BackupError("None of the selected files or folders could be read. "
                           + (warnings[0] if warnings else ""))

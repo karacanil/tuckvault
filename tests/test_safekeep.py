@@ -239,6 +239,34 @@ class Retention(Base):
             self.assertEqual(res["status"], "success", res)
 
 
+class Destinations(Base):
+    def test_bootstrap_path_used_for_ssh(self):
+        """The agent source is sent to a separate python, as it is over SSH."""
+        self.cfg["destination"] = {"type": "process", "path": str(self.repo)}
+        r = self.backup()
+        res, restored = self.restore(r["snapshot"])
+        self.assertEqual(res["status"], "success", res)
+        self.assert_same_tree(restored)
+        self.assertEqual(engine.run_verify(self.cfg)["status"], "success")
+
+    def test_backup_folder_inside_a_source_is_not_backed_up(self):
+        inside = self.src / "backups"
+        self.cfg["destination"] = {"type": "local", "folder": str(inside)}
+        self.assertEqual(self.backup()["files"], 5)
+        r = self.backup()  # the repository now exists inside the source
+        self.assertEqual((r["files"], r["uploaded_bytes"]), (5, 0), r)
+
+    def test_missing_drive_is_reported_plainly(self):
+        free = next(f"{c}:\\" for c in "ZYXWVUTSRQ" if not os.path.exists(f"{c}:\\"))
+        self.cfg["destination"] = {"type": "local", "folder": free + "safekeep"}
+        r = self.backup(expect="failed")
+        self.assertIn("is not connected", r["error"])
+
+    def test_no_folder_set(self):
+        self.cfg["destination"] = {"type": "local", "folder": ""}
+        self.assertIn("No backup folder", self.backup(expect="failed")["error"])
+
+
 class PerItemSchedules(Base):
     def setUp(self):
         super().setUp()

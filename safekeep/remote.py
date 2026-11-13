@@ -2,7 +2,9 @@
 
 import collections
 import hashlib
+import io
 import json
+import os
 import shutil
 import struct
 import subprocess
@@ -35,6 +37,58 @@ def _ssh_exe() -> str:
     raise ConnectError("The ssh program was not found on this PC.")
 
 
+class _InProcessAgent:
+    """The storage agent in a thread of this process, for folder destinations.
+
+    Looks enough like a subprocess.Popen for Remote: the same protocol runs
+    over two pipes, so a folder is handled exactly like a remote machine.
+    """
+
+    def __init__(self):
+        from . import agent
+        to_agent_r, to_agent_w = os.pipe()
+        from_agent_r, from_agent_w = os.pipe()
+        self.stdin = os.fdopen(to_agent_w, "wb")
+        self.stdout = os.fdopen(from_agent_r, "rb")
+        self.stderr = io.BytesIO()
+        inp, out = os.fdopen(to_agent_r, "rb"), os.fdopen(from_agent_w, "wb")
+
+        def serve():
+            try:
+                agent.Agent(inp, out).serve()
+            except Exception:
+                pass
+            finally:
+                for stream in (out, inp):
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+
+        self._thread = threading.Thread(target=serve, daemon=True)
+        self._thread.start()
+
+    def poll(self):
+        return None if self._thread.is_alive() else 0
+
+    def wait(self, timeout=None):
+        self._thread.join(timeout)
+        if self._thread.is_alive():
+            raise subprocess.TimeoutExpired("agent", timeout)
+        return 0
+
+    def kill(self):
+        try:
+            self.stdin.close()
+        except Exception:
+            pass
+
+
+def folder_of(destination: dict) -> str:
+    """The folder a "local" destination stores into."""
+    return destination.get("folder") or destination.get("path") or ""
+
+
 class Remote:
     def __init__(self, destination: dict):
         self.dest = destination
@@ -43,7 +97,7 @@ class Remote:
 
     # -- connection ------------------------------------------------------
     def _command(self):
-        if self.dest.get("type") == "local":
+        if self.dest.get("type") == "process":  # the SSH code path without SSH, for tests
             return [sys.executable, "-c", _BOOT]
         host = (self.dest.get("host") or "").strip()
         if not host or host.startswith("-"):
@@ -56,17 +110,28 @@ class Remote:
                 host, "python3 -c '%s'" % _BOOT]
 
     def connect(self):
-        source = (Path(__file__).parent / "agent.py").read_bytes()
+        local = self.dest.get("type") == "local"
+        if local:
+            folder = folder_of(self.dest).strip()
+            if not folder:
+                raise ConnectError("No backup folder is set.")
+            anchor = Path(os.path.abspath(folder)).anchor
+            if anchor and not os.path.exists(anchor):
+                raise ConnectError(f'The backup drive "{anchor}" is not connected.')
+            self.proc = _InProcessAgent()
+        else:
+            source = (Path(__file__).parent / "agent.py").read_bytes()
+            try:
+                self.proc = subprocess.Popen(self._command(), stdin=subprocess.PIPE,
+                                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                             creationflags=_NO_WINDOW)
+            except OSError as e:
+                raise ConnectError(f"Could not start the connection: {e}")
+            threading.Thread(target=self._drain_stderr, daemon=True).start()
         try:
-            self.proc = subprocess.Popen(self._command(), stdin=subprocess.PIPE,
-                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                         creationflags=_NO_WINDOW)
-        except OSError as e:
-            raise ConnectError(f"Could not start the connection: {e}")
-        threading.Thread(target=self._drain_stderr, daemon=True).start()
-        try:
-            self.proc.stdin.write(b"%d\n" % len(source) + source)
-            self.proc.stdin.flush()
+            if not local:
+                self.proc.stdin.write(b"%d\n" % len(source) + source)
+                self.proc.stdin.flush()
             # Skip anything a login script printed before the agent started.
             seen = 0
             while True:
@@ -78,7 +143,7 @@ class Remote:
                     break
         except OSError:
             pass
-        where = self.dest.get("host") or self.dest.get("path") or ""
+        where = self.dest.get("host") or folder_of(self.dest)
         raise ConnectError(self._failure(
             f'Could not reach the backup machine "{where}". Is it switched on and connected?'))
 
@@ -158,6 +223,8 @@ class Remote:
 
     # -- convenience -----------------------------------------------------
     def open(self, create: bool):
+        if self.dest.get("type") == "local":
+            return self.call("open", repo=folder_of(self.dest), create=create)[0]
         return self.call("open", repo=self.dest.get("path") or "safekeep-repo", create=create)[0]
 
     def list_blobs(self) -> dict:
