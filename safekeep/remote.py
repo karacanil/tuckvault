@@ -13,6 +13,9 @@ import threading
 from pathlib import Path
 
 MARKER = b"SAFEKEEP-AGENT 1\n"
+# The storage side is not trusted: never let a reply make this PC allocate without bound.
+MAX_HEADER = 64 * 1024 * 1024
+MAX_PAYLOAD = 512 * 1024 * 1024
 # Runs on the far side: read the agent's source from stdin, then execute it.
 # Nothing has to be installed there except python3.
 _BOOT = "import sys;exec(sys.stdin.buffer.read(int(sys.stdin.buffer.readline())))"
@@ -186,6 +189,13 @@ class Remote:
                 pass
         self.proc = None
 
+    def kill(self):
+        """Drop the connection without the polite goodbye (the stream is out of sync)."""
+        try:
+            self.proc.kill()
+        except Exception:
+            pass
+
     def __enter__(self):
         return self.connect()
 
@@ -215,8 +225,18 @@ class Remote:
             self.proc.stdin.flush()
         except OSError:
             raise RemoteError(self._failure("Lost the connection to the backup machine"))
-        resp = json.loads(self._read_exact(struct.unpack(">I", self._read_exact(4))[0]))
-        data = self._read_exact(resp["size"]) if resp.get("size") else b""
+        hdr_len = struct.unpack(">I", self._read_exact(4))[0]
+        if hdr_len > MAX_HEADER:
+            raise RemoteError("The backup destination sent an invalid reply.")
+        try:
+            resp = json.loads(self._read_exact(hdr_len))
+            size = int(resp.get("size") or 0) if isinstance(resp, dict) else -1
+        except (ValueError, TypeError):
+            size = -1
+        if size < 0 or size > MAX_PAYLOAD:
+            self.kill()
+            raise RemoteError("The backup destination sent an invalid reply.")
+        data = self._read_exact(size) if size else b""
         if not resp.get("ok"):
             raise RemoteError(resp.get("error") or "the backup machine reported an error")
         return resp, data

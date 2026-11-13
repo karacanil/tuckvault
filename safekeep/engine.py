@@ -161,8 +161,31 @@ class Repo:
             raw = self.remote.get_snapshot(name)
             manifest = self.keys.open_snapshot(raw)
             cached.write_bytes(raw)
+        if manifest.get("name") not in (None, name):
+            raise crypto.IntegrityError("a backup is stored under a different name than it was "
+                                        "created with (possible tampering)")
         self._manifests[name] = manifest
         return manifest
+
+    def vanished(self) -> list:
+        """Backups this PC has seen at the destination that are no longer there.
+
+        Safekeep forgets a backup locally when it removes it itself, so
+        anything listed here was removed by someone or something else.
+        Each one is reported once.
+        """
+        present = set(self.snapshot_names())
+        gone = []
+        for cached in paths.snapshot_cache(self.id).glob("*.snap"):
+            if cached.name not in present:
+                gone.append(cached.name)
+                try:
+                    cached.unlink()
+                except OSError:
+                    pass
+        if gone:
+            log.error("backups vanished from the destination: %s", ", ".join(sorted(gone)))
+        return sorted(gone)
 
     def referenced_blobs(self, names):
         """blob name -> set of snapshot names that need it."""
@@ -306,6 +329,10 @@ def _backup(cfg, sources, result, progress, attempts):
     _progress(progress, "connect", 0, 0, "Connecting to the backup destination…")
     with _connect(cfg, create=True, attempts=attempts, progress=progress) as repo:
         remote, keys = repo.remote, repo.keys
+        gone = repo.vanished()
+        if gone:
+            warnings.append(f"{len(gone)} earlier backups have disappeared from the backup "
+                            "destination without Safekeep removing them.")
         blobs = remote.list_blobs()
         free = remote.call("stat")[0]["free"]
 
@@ -362,7 +389,8 @@ def _backup(cfg, sources, result, progress, attempts):
         # Names sort chronologically; microseconds keep quick successive runs in order.
         snap_name = (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
                      + "-" + secrets.token_hex(3) + ".snap")
-        manifest = {"v": 1, "created": now_iso(), "host": platform.node(), "sources": sources,
+        manifest = {"v": 1, "name": snap_name, "created": now_iso(), "host": platform.node(),
+                    "sources": sources,
                     "files": entries, "stats": {"files": result["files"], "bytes": result["bytes"]},
                     "warnings": warnings[:50]}
         raw = keys.seal_snapshot(manifest)
@@ -421,6 +449,7 @@ def _scrub(repo: Repo, progress=None):
     Damaged blobs are deleted on purpose: they are useless, and removing
     them makes the next backup upload a fresh copy if the file still exists.
     """
+    gone = repo.vanished()
     names = repo.snapshot_names()
     unreadable = []
     for n in names:
@@ -437,7 +466,7 @@ def _scrub(repo: Repo, progress=None):
         log.error("scrub found %d damaged/missing blobs: %s", len(bad), ", ".join(b[:12] for b in bad))
     log.info("scrub: %d blobs checked, %d bad, %d unreadable snapshots",
              len(refs), len(bad), len(unreadable))
-    if not bad and not unreadable:
+    if not bad and not unreadable and not gone:
         return None
     hit = set()
     for b in bad:
@@ -449,6 +478,9 @@ def _scrub(repo: Repo, progress=None):
                      "the files that still exist on this PC.")
     if unreadable:
         parts.append(f"{len(unreadable)} backups could not be read at all (damaged index).")
+    if gone:
+        parts.append(f"{len(gone)} earlier backups have disappeared from the backup destination "
+                     "without Safekeep removing them.")
     return " ".join(parts)
 
 

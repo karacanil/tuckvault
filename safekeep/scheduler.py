@@ -165,7 +165,7 @@ def task_xml(schedule: dict, group_id: str = config.DEFAULT_GROUP) -> str:
 
 
 def _schtasks(*args):
-    return subprocess.run(["schtasks", *args], capture_output=True, text=True,
+    return subprocess.run([paths.system_exe("schtasks.exe"), *args], capture_output=True, text=True,
                           errors="replace", creationflags=_NO_WINDOW)
 
 

@@ -239,6 +239,81 @@ class Retention(Base):
             self.assertEqual(res["status"], "success", res)
 
 
+class UntrustedStorage(Base):
+    """Things a broken or hostile storage side could do."""
+
+    def test_old_backup_passed_off_as_new_is_rejected(self):
+        first = self.backup()["snapshot"]
+        (self.src / "a.txt").write_bytes(b"new content")
+        second = self.backup()["snapshot"]
+        snaps = self.repo / "snapshots"
+        (snaps / second).write_bytes((snaps / first).read_bytes())  # roll the newest one back
+        shutil.rmtree(paths.snapshot_cache(self.repo_id()))
+        listed = {s["name"]: s for s in engine.list_snapshots(self.cfg)}
+        self.assertNotIn("error", listed[first])
+        self.assertIn("different name", listed[second]["error"])
+        res, _ = self.restore(second)
+        self.assertEqual(res["status"], "failed")
+
+    def test_vanished_backup_is_reported_once(self):
+        first = self.backup()["snapshot"]
+        self.backup()
+        (self.repo / "snapshots" / first).unlink()
+        r = engine.run_verify(self.cfg)
+        self.assertEqual(r["status"], "failed")
+        self.assertIn("disappeared", r["error"])
+        self.assertEqual(engine.run_verify(self.cfg)["status"], "success")
+        # ...and by a normal backup run too
+        second = sorted(p.name for p in (self.repo / "snapshots").iterdir())[0]
+        (self.repo / "snapshots" / second).unlink()
+        r = self.backup(expect="warning")
+        self.assertIn("disappeared", r["warnings"][0])
+        self.backup()
+
+    def test_removing_old_backups_ourselves_is_not_reported(self):
+        self.cfg["keep_last"] = 1
+        for _ in range(3):
+            self.backup()
+        self.assertEqual(engine.run_verify(self.cfg)["status"], "success")
+
+    def test_oversized_reply_is_refused(self):
+        import io
+        import struct
+        from safekeep import remote
+
+        class Fake:
+            stdin = io.BytesIO()
+            stderr = io.BytesIO()
+
+            def __init__(self, reply):
+                self.stdout = io.BytesIO(reply)
+
+            def poll(self):
+                return 0
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                pass
+
+        r = remote.Remote({"type": "local", "folder": "x"})
+        r.proc = Fake(struct.pack(">I", remote.MAX_HEADER + 1))
+        with self.assertRaises(remote.RemoteError):
+            r.call("stat")
+        hdr = b'{"ok": true, "size": %d}' % (remote.MAX_PAYLOAD + 1)
+        r.proc = Fake(struct.pack(">I", len(hdr)) + hdr)
+        with self.assertRaises(remote.RemoteError):
+            r.call("stat")
+        r.proc = Fake(struct.pack(">I", 5) + b"[1,2]")
+        with self.assertRaises(remote.RemoteError):
+            r.call("stat")
+
+    def repo_id(self):
+        import json
+        return json.loads((self.repo / "repo.json").read_text())["id"]
+
+
 class Destinations(Base):
     def test_bootstrap_path_used_for_ssh(self):
         """The agent source is sent to a separate python, as it is over SSH."""

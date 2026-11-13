@@ -51,5 +51,15 @@ def project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def system_exe(name: str) -> str:
+    """Full path of a Windows system program, so a look-alike earlier on PATH is never run."""
+    root = os.environ.get("SystemRoot") or r"C:\Windows"
+    for sub in ("System32", r"System32\WindowsPowerShell\v1.0", r"System32\OpenSSH"):
+        candidate = os.path.join(root, sub, name)
+        if os.path.isfile(candidate):
+            return candidate
+    return name
+
+
 def icon_file() -> Path:
     return Path(__file__).resolve().parent / "assets" / "safekeep.ico"

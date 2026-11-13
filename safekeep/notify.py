@@ -6,6 +6,8 @@ import subprocess
 import sys
 from xml.sax.saxutils import escape
 
+from . import paths
+
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 # Toasts must be sent on behalf of an app Windows already knows; Windows
 # PowerShell is always registered, so the toast is attributed to it.
@@ -31,7 +33,7 @@ def _toast(title: str, body: str) -> bool:
     encoded = base64.b64encode(_SCRIPT.encode("utf-16-le")).decode("ascii")
     try:
         res = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+            [paths.system_exe("powershell.exe"), "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
             env=env, capture_output=True, timeout=30, creationflags=_NO_WINDOW)
         return res.returncode == 0
     except (OSError, subprocess.TimeoutExpired):

@@ -39,7 +39,7 @@ def _norm(path: str) -> str:
 
 def source_id(path: str) -> str:
     """Short stable name for one backed-up item, safe in a task name."""
-    return hashlib.sha1(_norm(path).encode("utf-8")).hexdigest()[:10]
+    return hashlib.sha256(_norm(path).encode("utf-8")).hexdigest()[:10]
 
 
 def own_schedule(cfg: dict, path: str):
