@@ -72,9 +72,11 @@ jobs:
         shell: pwsh
         run: |
           Set-Location dist
-          Get-ChildItem "Safekeep-$env:VERSION-*" | ForEach-Object {
+          # Unix line endings, so "sha256sum -c" accepts the file as well
+          $lines = Get-ChildItem "Safekeep-$env:VERSION-*" | ForEach-Object {
             "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
-          } | Set-Content -Encoding ascii SHA256SUMS.txt
+          }
+          [IO.File]::WriteAllText("$PWD\SHA256SUMS.txt", ($lines -join "`n") + "`n")
           Get-Content SHA256SUMS.txt
 
       - name: Release notes from the changelog
