@@ -264,7 +264,9 @@ def _units(schedule, args, description, catch_up=True):
                f"{env}"
                "ExecStart=" + " ".join(_sd_quote(a) for a in argv) + "\n"
                "TimeoutStartSec=12h\n"
-               "Nice=10\n")
+               "Nice=10\n"
+               # "watch" answers 1 after raising its alarm; that is not a broken service
+               + ("" if catch_up else "SuccessExitStatus=1\n"))
     timer = ("[Unit]\n"
              f"Description={description}\n\n"
              "[Timer]\n"
@@ -376,7 +378,7 @@ def installed() -> set:
     return _tasks_named(task_name())
 
 
-def _name(group_id: str) -> str:
+def registered_name(group_id: str) -> str:
     """What installed() calls the task of one group."""
     return unit_for(task_for(group_id)) if _LINUX else task_for(group_id)
 
@@ -399,8 +401,8 @@ def _legacy() -> set:
 
 def is_active(cfg: dict) -> bool:
     """True if every schedule in the settings is registered with the system."""
-    wanted = {_name(g["id"]) for g in config.active_groups(cfg)}
-    return bool(wanted) and (wanted | {_name(WATCH)}) <= installed()
+    wanted = {registered_name(g["id"]) for g in config.active_groups(cfg)}
+    return bool(wanted) and (wanted | {registered_name(WATCH)}) <= installed()
 
 
 def next_due(cfg: dict, now: datetime = None):

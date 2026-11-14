@@ -807,7 +807,9 @@ class SystemdTimers(unittest.TestCase):
         self.assertIn("Type=oneshot", service)
         self.assertIn("OnCalendar=*-*-* 09:30:00\n", timer)
         self.assertIn("Persistent=true", timer)
-        _, watch_timer = scheduler.systemd_watch_units()
+        watch_service, watch_timer = scheduler.systemd_watch_units()
+        self.assertIn("SuccessExitStatus=1", watch_service)
+        self.assertNotIn("SuccessExitStatus", service)
         self.assertIn("OnCalendar=*-*-* 12:00:00\n", watch_timer)
         self.assertIn("Persistent=false", watch_timer)
         with self.assertRaises(OSError):
@@ -845,6 +847,7 @@ class SystemdForReal(Base):
         self.assertEqual(scheduler.installed(), {base, base + "-watch"})
         self.assertTrue(scheduler.is_active(self.cfg))
         self.assertEqual(self.enabled(base), "enabled")
+        self.assertIn(scheduler.registered_name("default"), scheduler.installed())  # what "schedule status" asks
 
         # a real scheduled run, started the way the timer starts it
         res = scheduler._systemctl("start", base + ".service")

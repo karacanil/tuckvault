@@ -126,7 +126,7 @@ def main(argv=None) -> int:
         installed = scheduler.installed()
         for g in config.groups(cfg):
             if g["sources"]:
-                state = "installed" if scheduler.task_for(g["id"]) in installed else "not installed"
+                state = "installed" if scheduler.registered_name(g["id"]) in installed else "not installed"
                 _out(f"{scheduler.describe(g['schedule'])} ({state}): {'; '.join(g['sources'])}")
         return 0
     if args.cmd == "key":
