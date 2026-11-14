@@ -5,6 +5,9 @@ by the same Windows user account. Scheduled backups can therefore run
 unattended without a passphrase, while a copy of the file is useless to
 anyone else. The recovery key (see crypto.encode_recovery_key) is the only
 way to read the backups if this Windows account is lost.
+
+On Linux the key file is protected by its permissions only (readable by
+this user alone, like an SSH key), and is refused if others can read it.
 """
 
 import os
@@ -47,6 +50,11 @@ def load():
     if raw.startswith(_MAGIC_DPAPI):
         return _dpapi(raw[len(_MAGIC_DPAPI):], protect=False)
     if raw.startswith(_MAGIC_RAW):
+        if sys.platform != "win32":
+            mode = paths.key_file().stat().st_mode
+            if mode & 0o077:
+                raise OSError(f"The key file {paths.key_file()} can be read by other users, so it "
+                              f"may have leaked. Run: chmod 600 '{paths.key_file()}'")
         return raw[len(_MAGIC_RAW):]
     raise OSError("The key file on this PC is not recognised.")
 

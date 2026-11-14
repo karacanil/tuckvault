@@ -2,14 +2,15 @@
 
 # Tuckvault
 
-Small automatic backups for Windows. You pick files and folders, how often
-each should be backed up, and where the backups go: another computer over
-SSH, or a folder such as a USB disk, a network share or a cloud-synced
-folder. Everything is encrypted on your PC before it leaves, and what is
-stored is re-checked regularly.
+Small automatic backups for Windows and Linux. You pick files and folders,
+how often each should be backed up, and where the backups go: another
+computer over SSH, or a folder such as a USB disk, a network share or a
+cloud-synced folder. Everything is encrypted on your computer before it
+leaves, and what is stored is re-checked regularly.
 
-Windows starts each backup on schedule; nothing of Tuckvault keeps running
-in between. You hear from it only when a backup fails.
+The system starts each backup on schedule (Task Scheduler on Windows,
+systemd timers on Linux); nothing of Tuckvault keeps running in between.
+You hear from it only when a backup fails.
 
 ![The Backup tab](docs/screenshot-backup.png)
 
@@ -26,14 +27,43 @@ Download from the [latest release](https://github.com/karacanil/tuckvault/releas
 | --- | --- |
 | `Tuckvault-x.y.z-setup.exe` | You want a normal install: Start menu entry, uninstaller, no administrator rights needed. |
 | `Tuckvault-x.y.z-windows-portable.zip` | You want no installer: unzip anywhere and run `Tuckvault.exe`. |
-| `SHA256SUMS.txt` | You want to check a download: `Get-FileHash <file>` must print the same value. |
+| `Tuckvault-x.y.z-linux.tar.gz` | You are on Linux; see [Linux](#linux) below. |
+| `SHA256SUMS.txt` | You want to check a download: `Get-FileHash <file>` (Windows) or `sha256sum -c SHA256SUMS.txt` (Linux) must agree. |
 
 The files are not code-signed yet, so Windows SmartScreen shows "Windows
 protected your PC" on first start. Choose **More info**, then **Run anyway**.
 
-Requirements: Windows 10 or 11 (64-bit). For an SSH destination, the other
-computer needs `python3` and an SSH login that works without typing a
-password (an SSH key); nothing is installed on it.
+Requirements: Windows 10 or 11 (64-bit), or Linux with Python 3.10+ and
+systemd. For an SSH destination, the other computer needs `python3` and an
+SSH login that works without typing a password (an SSH key); nothing is
+installed on it.
+
+### Linux
+
+```sh
+sudo apt install python3-venv python3-tk    # Debian/Ubuntu; other distributions have the same packages
+tar xzf Tuckvault-x.y.z-linux.tar.gz
+cd tuckvault-x.y.z
+sh tools/install-linux.sh
+```
+
+This installs for your user only (no root): the program goes to
+`~/.local/share/tuckvault`, the `tuckvault` command to `~/.local/bin`, and
+Tuckvault appears in your applications menu. `sh tools/install-linux.sh
+--uninstall` removes it again; settings (`~/.config/tuckvault`) and backups
+stay.
+
+Differences from Windows:
+
+- Automatic backups are systemd user timers. They run while you are logged
+  in; to keep them running after you log out, run
+  `loginctl enable-linger $USER` once.
+- The key on your computer is protected by file permissions (readable by
+  you alone, like an SSH key) rather than by Windows' own encryption.
+  Tuckvault refuses to use it if others can read it.
+- Notifications use `notify-send`.
+- Under WSL (Windows Subsystem for Linux) the window opens through WSLg,
+  and timers run while the WSL distribution is running.
 
 ## Use
 

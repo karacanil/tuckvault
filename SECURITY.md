@@ -56,6 +56,12 @@ be switched off on the Security tab. Scheduled backups never do it.
 
 ## Known limitations
 
+- On Linux the key file on your computer (`~/.config/tuckvault/key.bin`) is
+  protected only by its permissions (0600, readable by you alone), not
+  encrypted by the operating system as Windows DPAPI does. Anyone who can
+  read your files as you, or as root, can read it. Tuckvault refuses a key
+  file that other users can read.
+
 - The daily check for backups that stopped happening is itself a
   scheduled task. If Windows Task Scheduler is not running at all, nothing
   can raise the alarm; the Backup tab still shows the last successful

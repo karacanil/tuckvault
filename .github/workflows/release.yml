@@ -68,6 +68,10 @@ jobs:
           Start-Sleep 3
           if (Test-Path "$target\Tuckvault.exe") { throw "uninstall left the program behind" }
 
+      - name: Linux download (source and install script)
+        shell: pwsh
+        run: git archive --format=tar.gz --prefix="tuckvault-$env:VERSION/" -o "dist/Tuckvault-$env:VERSION-linux.tar.gz" HEAD
+
       - name: Checksums
         shell: pwsh
         run: |
@@ -91,5 +95,6 @@ jobs:
           gh release create "${{ github.ref_name }}" `
             "dist/Tuckvault-$env:VERSION-setup.exe" `
             "dist/Tuckvault-$env:VERSION-windows-portable.zip" `
+            "dist/Tuckvault-$env:VERSION-linux.tar.gz" `
             "dist/SHA256SUMS.txt" `
             --title "Tuckvault $env:VERSION" --notes-file "$env:RUNNER_TEMP\notes.md" --verify-tag

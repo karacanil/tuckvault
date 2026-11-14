@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.4.0
+
+**New**
+
+- Linux support. Automatic backups use systemd user timers, notifications
+  use `notify-send`, and the window works the same as on Windows. The
+  release has a `Tuckvault-x.y.z-linux.tar.gz` with an install script that
+  needs no root (`sh tools/install-linux.sh`). See "Linux" in the README.
+- On Linux the key file is refused if other users can read it.
+
+**Changed**
+
+- Every system program Tuckvault starts (ssh, notify-send, systemctl,
+  xdg-open) is taken from the system folders by full path.
+- CI also runs every test on Linux.
+
 ## 1.3.0
 
 **Renamed to Tuckvault.** Until 1.2 this program was called Safekeep; the

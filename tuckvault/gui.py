@@ -2,11 +2,14 @@
 
 import os
 import queue
+import subprocess
+import sys
 import threading
 import tkinter as tk
 import webbrowser
 from datetime import datetime, timezone
 from tkinter import filedialog, messagebox, ttk
+from tkinter import font as tkfont
 
 from . import __version__, config, engine, keystore, paths, scheduler, updates, watch
 
@@ -129,14 +132,22 @@ class App(tk.Tk):
         self.title("Tuckvault")
         self.geometry("800x640")
         self.minsize(720, 600)
-        try:
-            ttk.Style(self).theme_use("vista")
-        except tk.TclError:
-            pass
+        for theme in ("vista", "clam"):
+            try:
+                ttk.Style(self).theme_use(theme)
+                break
+            except tk.TclError:
+                pass
         try:  # window, Alt-Tab and taskbar icon; dialogs inherit it
-            self.iconbitmap(default=str(paths.icon_file()))
+            if sys.platform == "win32":
+                self.iconbitmap(default=str(paths.icon_file()))
+            else:
+                self._icon = tk.PhotoImage(file=str(paths.icon_png()))
+                self.iconphoto(True, self._icon)
         except tk.TclError:
             pass
+        self.bold_font = tkfont.nametofont("TkDefaultFont").copy()
+        self.bold_font.configure(weight="bold")
         self.cfg = config.load()
         self.events = queue.Queue()
         self.busy = False
@@ -494,7 +505,7 @@ class App(tk.Tk):
         frame.pack(fill="both", expand=True)
         title = chosen[0] if len(chosen) == 1 else f"{len(chosen)} selected items"
         ttk.Label(frame, text=title, wraplength=460, justify="left",
-                  font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, PAD))
+                  font=self.bold_font).pack(anchor="w", pady=(0, PAD))
         mode = tk.StringVar(value="general" if current is None
                             else ("own" if current.get("enabled") else "manual"))
         editor = ScheduleEditor(frame)
@@ -543,7 +554,8 @@ class App(tk.Tk):
             lines.append("Overdue: " + late)
         nxt = scheduler.next_due(self.cfg)
         if nxt and scheduler.is_active(self.cfg):
-            lines.append("Next automatic backup: " + nxt.strftime("%d %b %Y %H:%M"))
+            lines.append("Next automatic backup: " + nxt.strftime("%d %b %Y %H:%M")
+                         + scheduler.RUNS_WHEN)
         elif nxt:
             lines.append("Automatic backups are not active yet. Click Save settings.")
         else:
@@ -584,8 +596,8 @@ class App(tk.Tk):
         path = paths.log_file()
         if not path.exists():
             messagebox.showinfo("Tuckvault", "There is no log yet.")
-        elif hasattr(os, "startfile"):
-            os.startfile(path)
+        else:
+            open_path(path)
 
     # -- background jobs -------------------------------------------------
     def _start(self, fn, on_done):
@@ -740,8 +752,8 @@ class App(tk.Tk):
 
         def done(result):
             self._report(result, f"Restored {result.get('files', 0)} files to {dest}.")
-            if result.get("files") and hasattr(os, "startfile"):
-                os.startfile(dest)
+            if result.get("files"):
+                open_path(dest)
 
         self._start(lambda progress: engine.run_restore(name, dest, cfg, progress=progress, only=only), done)
         return True
@@ -899,6 +911,19 @@ class App(tk.Tk):
         saved["recovery_key_saved"] = self.cfg["recovery_key_saved"]
         config.save(saved)
         self._sync_key_banner()
+
+
+def open_path(path) -> None:
+    """Show a file or folder in the system's file manager or viewer."""
+    if hasattr(os, "startfile"):
+        os.startfile(path)
+        return
+    opener = paths.trusted_exe("xdg-open")
+    if os.path.isabs(opener):
+        try:
+            subprocess.Popen([opener, str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
 
 
 def main():

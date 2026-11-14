@@ -185,6 +185,18 @@ class Protection(Base):
         res, _ = self.restore(r["snapshot"])
         self.assertEqual(res["status"], "failed")
 
+    @unittest.skipIf(sys.platform == "win32", "Windows protects the key with DPAPI instead")
+    def test_key_file_readable_by_others_is_refused(self):
+        self.backup()
+        key = paths.key_file()
+        self.assertEqual(key.stat().st_mode & 0o777, 0o600)
+        os.chmod(key, 0o644)
+        with self.assertRaises(OSError) as e:
+            keystore.load()
+        self.assertIn("chmod 600", str(e.exception))
+        os.chmod(key, 0o600)
+        self.assertIsNotNone(keystore.load())
+
     def test_wrong_key_is_refused(self):
         self.backup()
         keystore.store(crypto.new_master_key())
@@ -474,10 +486,20 @@ class Destinations(Base):
         self.assertEqual((r["files"], r["uploaded_bytes"]), (5, 0), r)
 
     def test_missing_drive_is_reported_plainly(self):
-        free = next(f"{c}:\\" for c in "ZYXWVUTSRQ" if not os.path.exists(f"{c}:\\"))
-        self.cfg["destination"] = {"type": "local", "folder": free + "tuckvault"}
-        r = self.backup(expect="failed")
-        self.assertIn("is not connected", r["error"])
+        if sys.platform == "win32":
+            free = next(f"{c}:\\" for c in "ZYXWVUTSRQ" if not os.path.exists(f"{c}:\\"))
+            self.cfg["destination"] = {"type": "local", "folder": free + "tuckvault"}
+            self.assertIn("is not connected", self.backup(expect="failed")["error"])
+        else:  # an unmounted disk: its mount folder is missing, and nothing is created in its place
+            unplugged = self.tmp / "media" / "usb"
+            self.cfg["destination"] = {"type": "local", "folder": str(unplugged / "tuckvault")}
+            self.assertIn("is connected and mounted", self.backup(expect="failed")["error"])
+            self.assertFalse(unplugged.exists())
+
+    def test_relative_folder_is_refused(self):
+        self.cfg["destination"] = {"type": "local", "folder": "backups"}
+        self.assertIn("not a full path", self.backup(expect="failed")["error"])
+        self.assertFalse(Path("backups").exists())
 
     def test_no_folder_set(self):
         self.cfg["destination"] = {"type": "local", "folder": ""}
@@ -502,8 +524,9 @@ class PerItemSchedules(Base):
         self.assertEqual(groups[1]["schedule"]["time"], "20:00")  # missing fields are filled in
         self.cfg["schedule"]["enabled"] = False
         self.assertEqual([g["id"] for g in config.active_groups(self.cfg)], [self.vault_id])
-        # the id does not depend on how the path is spelled
-        self.assertEqual(config.source_id(str(self.vault).upper()), self.vault_id)
+        # on Windows the id does not depend on upper or lower case; on Linux those are other files
+        same = config.source_id(str(self.vault).upper()) == self.vault_id
+        self.assertEqual(same, sys.platform == "win32")
 
     def test_scheduled_run_backs_up_only_its_items(self):
         r = engine.run_backup(self.cfg, only=self.vault_id)
@@ -568,7 +591,13 @@ class ChosenFiles(Base):
         self.assertEqual(listed[str(self.src / "a.txt")], len(SECRET) * 50)
 
         out = self.tmp / "one"
-        r = engine.run_restore(snap, str(out), self.cfg, only=[str(self.src / "a.txt").upper()])
+        chosen = str(self.src / "a.txt")
+        if sys.platform == "win32":  # Windows names ignore upper and lower case
+            chosen = chosen.upper()
+        else:  # Linux names do not
+            r = engine.run_restore(snap, str(self.tmp / "no"), self.cfg, only=[chosen.upper()])
+            self.assertEqual(r["status"], "failed", r)
+        r = engine.run_restore(snap, str(out), self.cfg, only=[chosen])
         self.assertEqual((r["status"], r["files"]), ("success", 1), r)
         got = [p for p in out.rglob("*") if p.is_file()]
         self.assertEqual([p.name for p in got], ["a.txt"])
@@ -714,10 +743,13 @@ class Renamed(unittest.TestCase):
             (old / "key.bin").write_bytes(b"k")
             (old / "safekeep.log").write_text("x", encoding="utf-8")
             env = {k: v for k, v in os.environ.items() if k != "TUCKVAULT_HOME"}
-            env["APPDATA"] = tmp
+            env["APPDATA"] = env["HOME"] = tmp
+            if sys.platform != "win32":  # Linux: ~/.config/safekeep becomes ~/.config/tuckvault
+                (Path(tmp) / ".config").mkdir()
+                old = old.rename(Path(tmp) / ".config" / "safekeep")
             with mock.patch.dict(os.environ, env, clear=True):
                 home = paths.app_dir()
-                self.assertEqual(home, Path(tmp) / "Tuckvault")
+                self.assertEqual(home, old.with_name("Tuckvault" if sys.platform == "win32" else "tuckvault"))
                 self.assertFalse(old.exists())
                 self.assertEqual(sorted(p.name for p in home.iterdir()),
                                  ["config.json", "key.bin", "tuckvault.log"])
@@ -738,6 +770,109 @@ class Renamed(unittest.TestCase):
             with mock.patch.dict(os.environ, {name: "x"}),                     mock.patch.object(scheduler, "_tasks_named", side_effect=AssertionError("asked Windows")):
                 self.assertEqual(scheduler._legacy(), set())
         self.assertEqual(scheduler.LEGACY_TASKS, "Safekeep\\Backup")
+
+
+class SystemdTimers(unittest.TestCase):
+    """The Linux side of scheduling. The unit text is checked on every platform."""
+
+    def test_calendar_for_every_frequency(self):
+        base = dict(config.DEFAULTS["schedule"], time="07:05", weekday="WED", monthday=9)
+        cal = lambda **kw: scheduler._calendar(dict(base, **kw))  # noqa: E731
+        self.assertEqual(cal(frequency="daily"), "*-*-* 07:05:00")
+        self.assertEqual(cal(frequency="weekly"), "Wed *-*-* 07:05:00")
+        self.assertEqual(cal(frequency="monthly"), "*-*-09 07:05:00")
+        self.assertEqual(cal(frequency="hourly", interval_hours=6), "*-*-* 00,06,12,18:00:00")
+        self.assertEqual(cal(frequency="hourly", interval_hours=24), "*-*-* 00:00:00")
+        self.assertEqual(cal(frequency="hourly", interval_hours=1).count(","), 23)
+
+    def test_next_run_matches_the_timer_on_linux(self):
+        from unittest import mock
+        base = dict(config.DEFAULTS["schedule"], frequency="hourly", interval_hours=5)
+        with mock.patch.object(scheduler, "_LINUX", True):
+            # 00, 05, 10, 15, 20, then 00 again: the day starts over at midnight
+            self.assertEqual(scheduler.next_run(base, datetime(2026, 11, 9, 21, 30)), datetime(2026, 11, 10, 0, 0))
+            self.assertEqual(scheduler.next_run(base, datetime(2026, 11, 9, 10, 0)), datetime(2026, 11, 9, 15, 0))
+            self.assertEqual(scheduler.next_run(base, datetime(2026, 11, 9, 4, 59)), datetime(2026, 11, 9, 5, 0))
+
+    def test_unit_text(self):
+        from unittest import mock
+        sched = dict(config.DEFAULTS["schedule"], frequency="daily", time="09:30")
+        with mock.patch.object(scheduler, "_program", return_value=("/opt/my apps/py%thon", "-m tuckvault ", "/w d")), \
+                mock.patch.dict(os.environ, {"TUCKVAULT_HOME": '/h/"x"$y'}):
+            service, timer = scheduler.systemd_units(sched, "abc123")
+        self.assertIn('ExecStart="/opt/my apps/py%%thon" "-m" "tuckvault" "run" "--scheduled" "--only" "abc123"\n',
+                      service)
+        self.assertIn("WorkingDirectory=/w d\n", service)
+        self.assertIn('Environment="TUCKVAULT_HOME=/h/\\"x\\"$y"\n', service)
+        self.assertIn("Type=oneshot", service)
+        self.assertIn("OnCalendar=*-*-* 09:30:00\n", timer)
+        self.assertIn("Persistent=true", timer)
+        _, watch_timer = scheduler.systemd_watch_units()
+        self.assertIn("OnCalendar=*-*-* 12:00:00\n", watch_timer)
+        self.assertIn("Persistent=false", watch_timer)
+        with self.assertRaises(OSError):
+            scheduler._sd_quote("bad\nname")
+
+    def test_unit_names(self):
+        self.assertEqual(scheduler.unit_for("Tuckvault\\Backup"), "tuckvault-backup")
+        self.assertEqual(scheduler.unit_for("Tuckvault\\Backup-1a2b3c4d5e"), "tuckvault-backup-1a2b3c4d5e")
+        self.assertEqual(scheduler.unit_for("Tuckvault\\Backup-watch"), "tuckvault-backup-watch")
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "systemd timers are the Linux scheduler")
+class SystemdForReal(Base):
+    """Registers real timers with this user's systemd under a test name, then removes them."""
+
+    def setUp(self):
+        super().setUp()
+        try:
+            scheduler._check_systemd()
+        except OSError as e:
+            self.skipTest(str(e))
+        os.environ["TUCKVAULT_TASK_NAME"] = f"Tuckvault\\UnitTest{os.getpid()}"
+        self.addCleanup(os.environ.pop, "TUCKVAULT_TASK_NAME", None)
+        self.addCleanup(scheduler.remove)
+
+    def enabled(self, unit):
+        return scheduler._systemctl("is-enabled", unit + ".timer").stdout.strip()
+
+    def test_apply_change_and_remove(self):
+        import subprocess
+        self.cfg["schedule"].update(enabled=True, frequency="daily", time="03:00")
+        config.save(self.cfg)
+        scheduler.apply(self.cfg)
+        base = scheduler.unit_for(scheduler.task_name())
+        self.assertEqual(scheduler.installed(), {base, base + "-watch"})
+        self.assertTrue(scheduler.is_active(self.cfg))
+        self.assertEqual(self.enabled(base), "enabled")
+
+        # a real scheduled run, started the way the timer starts it
+        res = scheduler._systemctl("start", base + ".service")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        last = config.load_state()["history"][0]
+        self.assertEqual((last["kind"], last["status"]), ("backup", "success"), last)
+
+        # an item with its own schedule gets its own timer; switching it off removes it again
+        item = str(self.tmp / "vault.json")
+        Path(item).write_bytes(b"v")
+        self.cfg["sources"].append(item)
+        self.cfg["source_schedules"] = {item: {"enabled": True, "frequency": "hourly", "interval_hours": 6}}
+        scheduler.apply(self.cfg)
+        own = base + "-" + config.source_id(item)
+        self.assertIn(own, scheduler.installed())
+        self.assertEqual(self.enabled(own), "enabled")
+        self.cfg["source_schedules"] = {}
+        scheduler.apply(self.cfg)
+        self.assertNotIn(own, scheduler.installed())
+        self.assertFalse((scheduler.unit_dir() / (own + ".service")).exists())
+
+        listed = subprocess.run([scheduler.paths.trusted_exe("systemctl"), "--user", "list-timers", "--all"],
+                                capture_output=True, text=True).stdout
+        self.assertIn(base + ".timer", listed)
+
+        scheduler.remove()
+        self.assertEqual(scheduler.installed(), set())
+        self.assertFalse(scheduler.is_active(self.cfg))
 
 
 class Scheduling(unittest.TestCase):

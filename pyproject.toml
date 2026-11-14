@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tuckvault"
-description = "Small automatic, encrypted, verified backups from a Windows PC to another computer or drive"
+description = "Small automatic, encrypted, verified backups from Windows or Linux to another computer or drive"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

@@ -77,6 +77,21 @@ def project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def trusted_exe(name: str) -> str:
+    """Full path of a system program, so a look-alike earlier on PATH is never run.
+
+    `name` is given without ".exe". Returns the bare name if it is not found
+    in the system folders; callers decide whether that is acceptable.
+    """
+    if sys.platform == "win32":
+        return system_exe(name + ".exe")
+    for folder in ("/usr/bin", "/bin"):
+        candidate = os.path.join(folder, name)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return name
+
+
 def system_exe(name: str) -> str:
     """Full path of a Windows system program, so a look-alike earlier on PATH is never run."""
     root = os.environ.get("SystemRoot") or r"C:\Windows"
@@ -89,3 +104,7 @@ def system_exe(name: str) -> str:
 
 def icon_file() -> Path:
     return Path(__file__).resolve().parent / "assets" / "tuckvault.ico"
+
+
+def icon_png() -> Path:
+    return Path(__file__).resolve().parent / "assets" / "tuckvault.png"

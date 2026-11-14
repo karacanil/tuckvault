@@ -45,9 +45,9 @@ class ConnectError(RemoteError):
 
 
 def _ssh_exe() -> str:
-    # Windows' own OpenSSH first (the same one scheduled runs get), then PATH.
+    # The system's own OpenSSH first (the same one scheduled runs get), then PATH.
     from . import paths
-    system = paths.system_exe("ssh.exe")
+    system = paths.trusted_exe("ssh")
     if os.path.isabs(system):
         return system
     found = shutil.which("ssh")
@@ -139,9 +139,17 @@ class Remote:
             folder = folder_of(self.dest).strip()
             if not folder:
                 raise ConnectError("No backup folder is set.")
-            anchor = Path(os.path.abspath(folder)).anchor
+            if not os.path.isabs(folder):  # never a folder relative to wherever the program started
+                raise ConnectError(f'The backup folder "{folder}" is not a full path. Choose it with Browse.')
+            anchor = Path(folder).anchor
             if anchor and not os.path.exists(anchor):
                 raise ConnectError(f'The backup drive "{anchor}" is not connected.')
+            parent = os.path.dirname(os.path.normpath(folder))
+            if sys.platform != "win32" and not os.path.isdir(parent):
+                # On Linux an unplugged disk leaves no missing drive letter, just a missing folder;
+                # creating it would quietly fill the internal disk instead.
+                raise ConnectError(f'"{parent}" does not exist. If the backups go to a removable '
+                                   "disk, check that it is connected and mounted.")
             self.proc = _InProcessAgent()
         else:
             source = (Path(__file__).parent / "agent.py").read_bytes()

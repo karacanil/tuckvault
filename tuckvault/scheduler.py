@@ -1,14 +1,16 @@
-"""Automatic runs through Windows Task Scheduler.
+"""Automatic runs through Windows Task Scheduler, or systemd timers on Linux.
 
-Nothing of Tuckvault stays running between backups: Windows starts
-`pythonw -m tuckvault run --scheduled --only <group>` at the chosen times,
-and starts it as soon as possible afterwards if the PC was off at that
-moment. There is one task for the items on the general schedule and one
-for each item that has a schedule of its own.
+Nothing of Tuckvault stays running between backups: the system starts
+`tuckvault run --scheduled --only <group>` at the chosen times, and starts
+it as soon as possible afterwards if the computer was off at that moment.
+There is one task (on Linux, one timer) for the items on the general
+schedule and one for each item that has a schedule of its own, plus a daily
+check that backups are still happening.
 """
 
 import csv
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -25,6 +27,9 @@ _DAY_XML = {"MON": "Monday", "TUE": "Tuesday", "WED": "Wednesday", "THU": "Thurs
 _MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
            "September", "October", "November", "December"]
 _EPOCH = datetime(2025, 1, 1)
+_LINUX = sys.platform.startswith("linux")
+# Shown after the next backup time: systemd user timers stop when the user logs out.
+RUNS_WHEN = " (while you are logged in)" if _LINUX else ""
 
 
 def task_name() -> str:
@@ -64,6 +69,10 @@ def next_run(schedule: dict, now: datetime = None):
     h, m = _hm(schedule)
     freq = schedule.get("frequency", "weekly")
     if freq == "hourly":
+        if _LINUX:  # systemd counts the hours afresh each day, see _calendar
+            later = [hh for hh in _hours(schedule) if hh > now.hour]
+            day = now.replace(minute=0, second=0, microsecond=0)
+            return day.replace(hour=later[0]) if later else day.replace(hour=0) + timedelta(days=1)
         step = timedelta(hours=_interval(schedule))
         return _EPOCH + step * (int((now - _EPOCH) / step) + 1)
     today = now.replace(hour=h, minute=m, second=0, microsecond=0)
@@ -117,6 +126,27 @@ def _trigger_xml(schedule: dict) -> str:
                 f"<Months>{months}</Months></ScheduleByMonth>")
     return (f"<CalendarTrigger><StartBoundary>{start}</StartBoundary>"
             f"<Enabled>true</Enabled>{body}</CalendarTrigger>")
+
+
+def _hours(schedule: dict) -> list:
+    return list(range(0, 24, _interval(schedule)))
+
+
+def _calendar(schedule: dict) -> str:
+    """The systemd OnCalendar= expression for a schedule.
+
+    Every N hours starts again at midnight each day (00, N, 2N, ...), so when
+    N does not divide 24 the last gap of the day is shorter.
+    """
+    h, m = _hm(schedule)
+    freq = schedule.get("frequency", "weekly")
+    if freq == "hourly":
+        return "*-*-* " + ",".join(f"{hh:02d}" for hh in _hours(schedule)) + ":00:00"
+    if freq == "daily":
+        return f"*-*-* {h:02d}:{m:02d}:00"
+    if freq == "weekly":
+        return f"{_DAY_XML[schedule.get('weekday', 'SUN')][:3]} *-*-* {h:02d}:{m:02d}:00"
+    return f"*-*-{_monthday(schedule):02d} {h:02d}:{m:02d}:00"
 
 
 def _runner():
@@ -193,16 +223,162 @@ def _task_xml(schedule, command, arguments, workdir, catch_up=True,
 """
 
 
+# -- Linux: systemd user timers ------------------------------------------------
+
+def unit_for(task: str) -> str:
+    """systemd unit name (without suffix) for a task name, e.g. tuckvault-backup-1a2b3c4d5e."""
+    return re.sub(r"[^a-z0-9]+", "-", task.lower()).strip("-")
+
+
+def unit_dir() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(Path.home(), ".config")
+    return Path(base) / "systemd" / "user"
+
+
+def _sd_check(value: str) -> str:
+    if any(c in value for c in "\n\r\0"):
+        raise OSError("A path contains a line break, which systemd cannot start.")
+    return value.replace("%", "%%")  # % starts a systemd specifier
+
+
+def _sd_quote(value: str, exec_line: bool = True) -> str:
+    """One argument for ExecStart= (or Environment=), quoted the way systemd unquotes it."""
+    value = _sd_check(value).replace("\\", "\\\\").replace('"', '\\"')
+    if exec_line:
+        value = value.replace("$", "$$")  # ExecStart= expands $VARS, Environment= does not
+    return f'"{value}"'
+
+
+def _units(schedule, args, description, catch_up=True):
+    """(service text, timer text) for one scheduled job."""
+    command, prefix, workdir = _program()
+    argv = [command] + prefix.split() + args
+    env = ""
+    if os.environ.get("TUCKVAULT_HOME"):  # a trial or test setup keeps using its own settings
+        env = "Environment=" + _sd_quote("TUCKVAULT_HOME=" + os.environ["TUCKVAULT_HOME"], False) + "\n"
+    service = ("[Unit]\n"
+               f"Description={description}\n\n"
+               "[Service]\n"
+               "Type=oneshot\n"
+               f"WorkingDirectory={_sd_check(workdir)}\n"
+               f"{env}"
+               "ExecStart=" + " ".join(_sd_quote(a) for a in argv) + "\n"
+               "TimeoutStartSec=12h\n"
+               "Nice=10\n")
+    timer = ("[Unit]\n"
+             f"Description={description}\n\n"
+             "[Timer]\n"
+             f"OnCalendar={_calendar(schedule)}\n"
+             f"Persistent={'true' if catch_up else 'false'}\n\n"
+             "[Install]\n"
+             "WantedBy=timers.target\n")
+    return service, timer
+
+
+def systemd_units(schedule: dict, group_id: str = config.DEFAULT_GROUP):
+    return _units(schedule, ["run", "--scheduled", "--only", group_id],
+                  "Tuckvault automatic backup. Managed by the Tuckvault app.")
+
+
+def systemd_watch_units():
+    schedule = {"enabled": True, "frequency": "daily", "time": "12:00"}
+    return _units(schedule, ["watch"], "Tuckvault check that automatic backups are still happening.",
+                  catch_up=False)
+
+
+def _systemctl(*args):
+    exe = paths.trusted_exe("systemctl")
+    if not os.path.isabs(exe):
+        raise OSError("Automatic backups need systemd, which was not found on this computer.")
+    try:
+        return subprocess.run([exe, "--user", *args], capture_output=True, text=True,
+                              errors="replace", timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise OSError(f"systemctl did not respond: {e}")
+
+
+def _check_systemd() -> None:
+    res = _systemctl("show-environment")
+    if res.returncode != 0:
+        raise OSError("Automatic backups need systemd user services, which are not running for "
+                      "this user: " + (res.stderr or res.stdout).strip())
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tuckvault-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _linux_installed() -> set:
+    base = unit_for(task_name())
+    try:
+        names = os.listdir(unit_dir())
+    except OSError:
+        return set()
+    return {n[:-6] for n in names
+            if n.endswith(".timer") and (n[:-6] == base or n[:-6].startswith(base + "-"))}
+
+
+def _linux_drop(units) -> None:
+    units = sorted(units)
+    if not units:
+        return
+    _systemctl("disable", "--now", *(u + ".timer" for u in units))
+    for u in units:
+        for suffix in (".timer", ".service"):
+            try:
+                os.remove(unit_dir() / (u + suffix))
+            except FileNotFoundError:
+                pass
+
+
+def _linux_apply(cfg: dict) -> None:
+    wanted = {unit_for(task_for(g["id"])): systemd_units(g["schedule"], g["id"])
+              for g in config.active_groups(cfg)}
+    if wanted:
+        wanted[unit_for(task_for(WATCH))] = systemd_watch_units()
+    _check_systemd()
+    _linux_drop(_linux_installed() - set(wanted))
+    for unit, (service, timer) in wanted.items():
+        _write(unit_dir() / (unit + ".service"), service)
+        _write(unit_dir() / (unit + ".timer"), timer)
+    res = _systemctl("daemon-reload")
+    if res.returncode == 0 and wanted:
+        res = _systemctl("enable", "--now", *(u + ".timer" for u in sorted(wanted)))
+    if res.returncode != 0:
+        raise OSError("systemd refused to schedule the backup: " + (res.stderr or res.stdout).strip())
+    watch.note_schedules(cfg)
+
+
+# -- Windows: Task Scheduler ---------------------------------------------------
+
 def _schtasks(*args):
     return subprocess.run([paths.system_exe("schtasks.exe"), *args], capture_output=True, text=True,
                           errors="replace", creationflags=_NO_WINDOW)
 
 
 def installed() -> set:
-    """Names of the Tuckvault backup tasks Windows currently has."""
+    """Names of the Tuckvault backup tasks the system currently has (systemd unit names on Linux)."""
+    if _LINUX:
+        return _linux_installed()
     if sys.platform != "win32":
         return set()
     return _tasks_named(task_name())
+
+
+def _name(group_id: str) -> str:
+    """What installed() calls the task of one group."""
+    return unit_for(task_for(group_id)) if _LINUX else task_for(group_id)
 
 
 def _tasks_named(name: str) -> set:
@@ -222,9 +398,9 @@ def _legacy() -> set:
 
 
 def is_active(cfg: dict) -> bool:
-    """True if every schedule in the settings is registered with Windows."""
-    wanted = {task_for(g["id"]) for g in config.active_groups(cfg)}
-    return bool(wanted) and (wanted | {task_for(WATCH)}) <= installed()
+    """True if every schedule in the settings is registered with the system."""
+    wanted = {_name(g["id"]) for g in config.active_groups(cfg)}
+    return bool(wanted) and (wanted | {_name(WATCH)}) <= installed()
 
 
 def next_due(cfg: dict, now: datetime = None):
@@ -240,6 +416,10 @@ def _delete(name: str) -> None:
 
 
 def remove() -> None:
+    if _LINUX:
+        _linux_drop(installed())
+        _systemctl("daemon-reload")
+        return
     for name in installed() | _legacy():
         _delete(name)
 
@@ -257,9 +437,12 @@ def refresh(cfg: dict) -> None:
 
 
 def apply(cfg: dict) -> None:
-    """Make Windows Task Scheduler match the schedules in the settings."""
+    """Make Windows Task Scheduler (or systemd on Linux) match the schedules in the settings."""
+    if _LINUX:
+        _linux_apply(cfg)
+        return
     if sys.platform != "win32":
-        raise OSError("Automatic scheduling is only implemented for Windows.")
+        raise OSError("Automatic scheduling is only implemented for Windows and Linux.")
     wanted = {task_for(g["id"]): task_xml(g["schedule"], g["id"]) for g in config.active_groups(cfg)}
     if wanted:
         wanted[task_for(WATCH)] = watch_xml()

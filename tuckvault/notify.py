@@ -33,7 +33,7 @@ def _toast(title: str, body: str) -> bool:
     encoded = base64.b64encode(_SCRIPT.encode("utf-16-le")).decode("ascii")
     try:
         res = subprocess.run(
-            [paths.system_exe("powershell.exe"), "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+            [paths.trusted_exe("powershell"), "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
             env=env, capture_output=True, timeout=30, creationflags=_NO_WINDOW)
         return res.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -46,13 +46,27 @@ def _message_box(title: str, body: str) -> None:
     ctypes.windll.user32.MessageBoxW(None, body, title, 0x30 | 0x10000 | 0x40000)
 
 
+def _notify_send(title: str, body: str) -> bool:
+    """A desktop notification on Linux, through the standard notify-send."""
+    exe = paths.trusted_exe("notify-send")
+    if not os.path.isabs(exe):
+        return False
+    try:
+        res = subprocess.run([exe, "-a", "Tuckvault", "-i", str(paths.icon_png()), "--", title, body],
+                             capture_output=True, timeout=30)
+        return res.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def notify(title: str, body: str) -> None:
-    """Show a Windows notification; fall back to a message box if toasts fail."""
+    """Show a desktop notification; on Windows fall back to a message box if toasts fail."""
     # control characters would make Windows reject the notification
     body = "".join(c if c.isprintable() else " " for c in body)
     body = body if len(body) <= 300 else body[:297] + "…"
     if sys.platform != "win32":
-        print(f"{title}: {body}", file=sys.stderr)
+        if not _notify_send(title, body):
+            print(f"{title}: {body}", file=sys.stderr)
         return
     if not _toast(title, body):
         _message_box(title, body)
