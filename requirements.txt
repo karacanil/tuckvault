@@ -2,4 +2,6 @@
 # build can be repeated and audited. Dependabot proposes updates.
 cryptography==50.0.2
 cffi==2.1.1
-pycparser==3.12
+pycparser==3.12; python_version >= "3.11"
+# 3.12 needs Python 3.11; Ubuntu 22.04 and Debian 12 ship 3.10 or 3.11
+pycparser==3.11; python_version < "3.11"
