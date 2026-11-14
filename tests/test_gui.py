@@ -32,6 +32,7 @@ class GuiFlow(unittest.TestCase):
         cfg = config.load()
         cfg["destination"] = {"type": "local", "host": "", "path": str(self.tmp / "repo")}
         cfg["schedule"]["enabled"] = False
+        cfg["check_updates"] = False  # tests never go online
         config.save(cfg)
         self.dialogs = []
         patches = [mock.patch.object(gui.messagebox, name,
@@ -241,6 +242,61 @@ class GuiFlow(unittest.TestCase):
         app._remove_sources()
         config.save(app._collect())
         self.assertEqual(config.load()["source_schedules"], {})
+
+    def test_restore_chosen_files_through_the_window(self):
+        app = self.app
+        app._add_paths([str(self.src)])
+        app._backup_now()
+        self.wait_idle()
+        app.notebook.select(1)
+        app._restore_files()  # nothing selected yet
+        self.assertEqual(self.dialogs[-1][0], "showinfo")
+        app._load_snapshots()
+        self.wait_idle()
+        app.snapshots.selection_set(app.snapshots.get_children()[0])
+        app._restore_files()
+        self.wait_idle()
+        dialog, tree, query, restore = app._file_dialog
+        app.update()
+        self.assertEqual(len(tree.get_children()), 2)
+        query.set("VAULT")  # the filter ignores upper and lower case
+        rows = tree.get_children()
+        self.assertEqual([os.path.basename(tree.set(r, "file")) for r in rows], ["vault.json"])
+        self.dialogs.clear()
+        restore()  # nothing selected in the list
+        self.assertEqual(self.dialogs[-1][0], "showinfo")
+        tree.selection_set(rows[0])
+        out = self.tmp / "picked"
+        out.mkdir()
+        with mock.patch.object(gui.filedialog, "askdirectory", return_value=str(out)):
+            restore()
+        self.wait_idle()
+        got = [p for p in out.rglob("*") if p.is_file()]
+        self.assertEqual([p.name for p in got], ["vault.json"])
+        self.assertEqual(got[0].read_bytes(), (self.src / "vault.json").read_bytes())
+        self.assertIn("Restored 1 files", app.status.cget("text"))
+
+    def test_update_notice_and_overdue_line(self):
+        app = self.app
+        self.assertEqual(app.update_note.winfo_manager(), "")
+        app.events.put(("update", "9.9.9"))
+        end = time.time() + 5
+        while app.update_note.winfo_manager() != "grid":
+            self.assertLess(time.time(), end)
+            app.update()
+        self.assertIn("9.9.9", app.update_note.cget("text"))
+        with mock.patch.object(gui.webbrowser, "open") as opened:
+            app.update_note.event_generate("<Button-1>")
+            app.update()
+            opened.assert_called_once_with(gui.updates.DOWNLOAD_PAGE)
+        app.v_updates.set(True)
+        app._updates_changed()
+        self.assertTrue(config.load()["check_updates"])
+
+        with mock.patch.object(gui.watch, "overdue", return_value=[{"path": str(self.src), "days": 9,
+                                                                    "never": False}]):
+            app._refresh_summary()
+        self.assertIn("Overdue: No successful backup of documents for 9 days", app.summary.cget("text"))
 
     def test_unreachable_machine_shows_an_error(self):
         app = self.app

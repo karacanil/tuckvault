@@ -46,11 +46,20 @@
 - Downloads are **not code-signed** yet. Compare them against
   `SHA256SUMS.txt` from the same release.
 
+## What Safekeep sends anywhere
+
+Your backup data goes to the destination you chose and nowhere else. The
+only other connection is the optional version check: when the window opens
+it asks `api.github.com` for the newest release number, at most once a
+day. It sends nothing about you or your files, downloads nothing, and can
+be switched off on the Security tab. Scheduled backups never do it.
+
 ## Known limitations
 
-- There is no alarm yet for backups that silently stop happening, for
-  example when the scheduled task is disabled or the settings file is
-  damaged. The Backup tab shows the last successful backup.
+- The daily check for backups that stopped happening is itself a
+  scheduled task. If Windows Task Scheduler is not running at all, nothing
+  can raise the alarm; the Backup tab still shows the last successful
+  backup and an "Overdue" line.
 - A backup computer that stalls without closing the connection can hold a
   backup run for a long time before it gives up.
 - `safekeep-cli key import <key>` takes the key on the command line, where
@@ -70,5 +79,7 @@ and exercises the built installer before publishing.
 
 ## Reporting a problem
 
-Open a private security advisory on the repository, or contact the owner
-directly. Please do not put details in a public issue.
+Report it privately through
+[a security advisory](https://github.com/karacanil/safekeep/security/advisories/new).
+Please do not put details in a public issue. You can expect a first answer
+within a week.

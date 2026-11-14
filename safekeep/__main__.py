@@ -36,12 +36,18 @@ def main(argv=None) -> int:
     restore = sub.add_parser("restore", help="restore a backup into a folder")
     restore.add_argument("snapshot", help="snapshot name, or 'latest'")
     restore.add_argument("dest", help="folder to restore into")
+    restore.add_argument("--only", action="append", metavar="PATH",
+                         help="restore just this file or folder, named as in the backup (repeatable)")
+    files = sub.add_parser("files", help="list the files in a backup")
+    files.add_argument("snapshot", help="snapshot name, or 'latest'")
     sched = sub.add_parser("schedule", help="install or remove the automatic run")
     sched.add_argument("action", choices=["apply", "remove", "status"])
     key = sub.add_parser("key", help="show or import the recovery key")
     key.add_argument("action", choices=["show", "import"])
     key.add_argument("value", nargs="?")
     sub.add_parser("test", help="test the connection to the backup machine")
+    sub.add_parser("watch", help="notify if automatic backups have stopped happening "
+                                 "(started daily by Windows)")
     args = parser.parse_args(argv)
 
     if args.cmd in (None, "gui"):
@@ -49,8 +55,22 @@ def main(argv=None) -> int:
         gui_main()
         return 0
 
-    from . import config, engine, keystore, notify, scheduler
+    from . import config, engine, keystore, notify, scheduler, watch
+    if args.cmd == "watch" or (args.cmd == "run" and args.scheduled):
+        if config.is_damaged():
+            notify.notify("Safekeep cannot read its settings",
+                          "The settings file is damaged, so automatic backups are not running. "
+                          "Open Safekeep and choose what to back up again.")
+            return 1
     cfg = config.load()
+
+    if args.cmd == "watch":
+        late = watch.overdue(cfg)
+        if late:
+            notify.notify("Backups have stopped", watch.describe(late)
+                          + " Open Safekeep to see what is wrong.")
+        _out(watch.describe(late) or "Automatic backups are up to date.")
+        return 1 if late else 0
 
     if args.cmd == "run":
         if args.scheduled and args.only is None:
@@ -66,7 +86,7 @@ def main(argv=None) -> int:
         return _print_result(result)
     if args.cmd == "verify":
         return _print_result(engine.run_verify(cfg))
-    if args.cmd == "restore":
+    if args.cmd in ("restore", "files"):
         name = args.snapshot
         try:
             if name == "latest":
@@ -78,7 +98,15 @@ def main(argv=None) -> int:
         except engine.BackupError as e:
             _out(str(e))
             return 1
-        return _print_result(engine.run_restore(name, args.dest, cfg))
+        if args.cmd == "files":
+            try:
+                for f in engine.snapshot_files(name, cfg):
+                    _out(f"{f['s']:>14}  {f['p']}")
+            except engine.BackupError as e:
+                _out(str(e))
+                return 1
+            return 0
+        return _print_result(engine.run_restore(name, args.dest, cfg, only=args.only))
     if args.cmd == "snapshots":
         try:
             for s in engine.list_snapshots(cfg):

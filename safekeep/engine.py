@@ -376,6 +376,9 @@ def run_backup(cfg: dict = None, progress=None, attempts: int = 1,
     if result["status"] != "skipped":
         try:
             config.record_run(result)
+            if result["status"] in ("success", "warning"):
+                from . import watch
+                watch.note_success(result.get("sources"), result["finished"])
         except OSError:
             log.exception("could not write the run history")
     log.info("backup finished: %s %s", result["status"], result.get("error", ""))
@@ -689,8 +692,23 @@ def _restore_target(dest: str, original: str) -> str:
     return target
 
 
-def run_restore(snapshot: str, dest: str, cfg: dict = None, progress=None) -> dict:
-    """Restore a whole snapshot below dest. Every byte is verified. Never raises."""
+def snapshot_files(snapshot: str, cfg: dict = None) -> list:
+    """What one backup contains: [{"p": path, "s": size, "m": mtime_ns}]. Raises BackupError."""
+    setup_logging()
+    cfg = cfg or config.load()
+    try:
+        with _connect(cfg, create=False) as repo:
+            return [{"p": f["p"], "s": f["s"], "m": f["m"]} for f in repo.manifest(snapshot)["files"]]
+    except (RemoteError, crypto.IntegrityError) as e:
+        raise BackupError(str(e))
+
+
+def run_restore(snapshot: str, dest: str, cfg: dict = None, progress=None, only=None) -> dict:
+    """Restore a snapshot below dest. Every byte is verified. Never raises.
+
+    only: files or folders (as they are named in the backup) to restore
+    instead of everything.
+    """
     setup_logging()
     cfg = cfg or config.load()
     result = {"kind": "restore", "started": now_iso(), "status": "failed", "warnings": [],
@@ -700,9 +718,15 @@ def run_restore(snapshot: str, dest: str, cfg: dict = None, progress=None) -> di
             _progress(progress, "connect", 0, 0, "Connecting to the backup destination…")
             with _connect(cfg, create=False) as repo:
                 manifest = repo.manifest(snapshot)
-                total = manifest["stats"]["bytes"]
+                files = manifest["files"]
+                if only is not None:
+                    wanted = [os.path.normcase(os.path.normpath(p)) for p in only]
+                    files = [f for f in files if _under(f["p"], wanted)]
+                    if not files:
+                        raise BackupError("None of the chosen files are in this backup.")
+                total = sum(f["s"] for f in files)
                 done = 0
-                for f in manifest["files"]:
+                for f in files:
                     target = _restore_target(dest, f["p"])
                     _progress(progress, "restore", done, total, f["p"])
                     part = target + ".safekeep-part"

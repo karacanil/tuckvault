@@ -61,7 +61,7 @@ def main() -> int:
         home.mkdir(exist_ok=True)
         (home / "config.json").write_text(json.dumps({
             "sources": [str(src)], "destination": destination,
-            "schedule": {"enabled": False}, "verify_every_days": 0}), encoding="utf-8")
+            "schedule": {"enabled": False}, "verify_every_days": 0, "check_updates": False}), encoding="utf-8")
 
     try:
         src = tmp / "documents"

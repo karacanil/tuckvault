@@ -4,10 +4,11 @@ import os
 import queue
 import threading
 import tkinter as tk
+import webbrowser
 from datetime import datetime, timezone
 from tkinter import filedialog, messagebox, ttk
 
-from . import __version__, config, engine, keystore, paths, scheduler
+from . import __version__, config, engine, keystore, paths, scheduler, updates, watch
 
 FREQ_LABELS = {"hourly": "Every few hours", "daily": "Every day",
                "weekly": "Every week", "monthly": "Every month"}
@@ -18,6 +19,7 @@ STATUS_LABELS = {"success": "OK", "warning": "Finished with problems", "failed":
                  "skipped": "Skipped"}
 KIND_LABELS = {"backup": "Backup", "verify": "Check", "restore": "Restore"}
 PAD = 8
+MAX_ROWS = 2000  # file rows shown at once when picking files to restore
 
 
 def local_time(iso: str) -> str:
@@ -153,6 +155,8 @@ class App(tk.Tk):
         self._refresh_activity()
         self._poll_id = self.after(100, self._poll)
         threading.Thread(target=scheduler.refresh, args=(config.load(),), daemon=True).start()
+        if self.cfg.get("check_updates"):
+            threading.Thread(target=self._check_for_update, daemon=True).start()
 
     def destroy(self):
         self.after_cancel(self._poll_id)
@@ -243,6 +247,8 @@ class App(tk.Tk):
         bottom = ttk.Frame(tab)
         bottom.grid(row=4, column=0, sticky="ew", pady=(PAD, 0))
         bottom.columnconfigure(0, weight=1)
+        self.update_note = ttk.Label(bottom, foreground="#0b5cad", cursor="hand2")
+        self.update_note.bind("<Button-1>", lambda e: webbrowser.open(updates.DOWNLOAD_PAGE))
         self.summary = ttk.Label(bottom, justify="left")
         self.summary.grid(row=0, column=0, sticky="w")
         b = ttk.Button(bottom, text="Save settings", command=self._save)
@@ -273,7 +279,8 @@ class App(tk.Tk):
         row = ttk.Frame(tab)
         row.grid(row=2, column=0, columnspan=2, sticky="ew")
         for text, cmd in (("Refresh list", self._load_snapshots),
-                          ("Restore selected…", self._restore_selected),
+                          ("Restore everything…", self._restore_selected),
+                          ("Restore chosen files…", self._restore_files),
                           ("Check all backups now", self._verify_now)):
             b = ttk.Button(row, text=text, command=cmd)
             b.pack(side="left", padx=(0, PAD))
@@ -307,8 +314,8 @@ class App(tk.Tk):
         text = (
             "How your backups are protected\n\n"
             "•  Everything is encrypted on this PC (AES-256) before it is sent. The backup "
-            "machine only ever stores unreadable data, including file names.\n"
-            "•  Every stored piece is named after its SHA-256 fingerprint. The backup machine "
+            "destination only ever stores unreadable data, including file names.\n"
+            "•  Every stored piece is named after its SHA-256 fingerprint. The backup destination "
             "re-checks those fingerprints regularly, so silent disk damage or tampering is "
             "detected and reported to you.\n"
             "•  Older backups are kept, so a file that was deleted or overwritten by mistake "
@@ -334,6 +341,10 @@ class App(tk.Tk):
         ttk.Checkbutton(tab, text="I have stored my recovery key somewhere safe",
                         variable=self.v_key_saved, command=self._key_saved_changed).pack(
             anchor="w", pady=(PAD * 2, 0))
+        self.v_updates = tk.BooleanVar()
+        ttk.Checkbutton(tab, text="Tell me when a new version is available (asks github.com when "
+                                  "this window opens)",
+                        variable=self.v_updates, command=self._updates_changed).pack(anchor="w", pady=(4, 0))
         ttk.Label(tab, text=f"Safekeep {__version__}", foreground="#777").pack(anchor="e", side="bottom")
 
     def _build_status_bar(self):
@@ -362,6 +373,7 @@ class App(tk.Tk):
         self._sync_destination_widgets()
         self.v_keep.set(str(cfg.get("keep_last", 30)))
         self.v_key_saved.set(bool(cfg.get("recovery_key_saved")))
+        self.v_updates.set(bool(cfg.get("check_updates")))
         self._sync_schedule_widgets()
         self._sync_key_banner()
 
@@ -526,6 +538,9 @@ class App(tk.Tk):
         lines = ["Last successful backup: " + local_time(state.get("last_success"))]
         if last and last.get("kind") == "backup" and last.get("status") == "failed":
             lines.append("Last attempt failed: " + local_time(last.get("finished")))
+        late = watch.describe(watch.overdue(self.cfg))
+        if late:
+            lines.append("Overdue: " + late)
         nxt = scheduler.next_due(self.cfg)
         if nxt and scheduler.is_active(self.cfg):
             lines.append("Next automatic backup: " + nxt.strftime("%d %b %Y %H:%M"))
@@ -600,6 +615,10 @@ class App(tk.Tk):
                 kind, data = self.events.get_nowait()
                 if kind == "progress":
                     latest = data
+                elif kind == "update":
+                    self.update_note.configure(
+                        text=f"Safekeep {data} is available. Click here to open the download page.")
+                    self.update_note.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
                 else:
                     self._finish(*data)
         except queue.Empty:
@@ -695,27 +714,104 @@ class App(tk.Tk):
 
         self._start(lambda progress: engine.list_snapshots(cfg), done)
 
-    def _restore_selected(self):
+    def _selected_snapshot(self):
         sel = self.snapshots.selection()
         if not sel:
             messagebox.showinfo("Safekeep", "Click Refresh list, then select the backup to restore.")
-            return
-        dest = filedialog.askdirectory(parent=self, title="Choose an empty folder to restore into")
+            return None
+        return sel[0]
+
+    def _restore_selected(self):
+        name = self._selected_snapshot()
+        if name:
+            self._restore_into_chosen_folder(name)
+
+    def _restore_into_chosen_folder(self, name, only=None, parent=None):
+        """Ask where to, then restore the backup (or just the files in only). True if started."""
+        dest = filedialog.askdirectory(parent=parent or self, title="Choose an empty folder to restore into")
         if not dest:
-            return
+            return False
         dest = os.path.normpath(dest)
         if os.listdir(dest) and not messagebox.askyesno(
                 "Safekeep", f"{dest} is not empty. Files with the same name inside it will be "
                             "replaced by the restored copies.\n\nRestore here anyway?"):
-            return
-        cfg, name = self._collect(), sel[0]
+            return False
+        cfg = self._collect()
 
         def done(result):
             self._report(result, f"Restored {result.get('files', 0)} files to {dest}.")
             if result.get("files") and hasattr(os, "startfile"):
                 os.startfile(dest)
 
-        self._start(lambda progress: engine.run_restore(name, dest, cfg, progress=progress), done)
+        self._start(lambda progress: engine.run_restore(name, dest, cfg, progress=progress, only=only), done)
+        return True
+
+    def _restore_files(self):
+        name = self._selected_snapshot()
+        if not name:
+            return
+        cfg = self._collect()
+        self._start(lambda progress: engine.snapshot_files(name, cfg),
+                    lambda files: self._pick_files(name, files))
+
+    def _pick_files(self, name, files):
+        self.status.configure(text=f"This backup contains {len(files)} files.")
+        dialog = tk.Toplevel(self)
+        dialog.title("Restore chosen files")
+        dialog.transient(self)
+        dialog.geometry("760x480")
+        dialog.minsize(520, 320)
+        frame = ttk.Frame(dialog, padding=PAD)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(1, weight=1)
+        ttk.Label(frame, text="Show files containing").grid(row=0, column=0, sticky="w")
+        query = tk.StringVar()
+        entry = ttk.Entry(frame, textvariable=query)
+        entry.grid(row=0, column=1, sticky="ew", padx=(PAD, 0))
+        tree = ttk.Treeview(frame, columns=("file", "size", "changed"), show="headings",
+                            selectmode="extended")
+        for col, text, width in (("file", "File", 470), ("size", "Size", 90), ("changed", "Last changed", 130)):
+            tree.heading(col, text=text, anchor="w")
+            tree.column(col, width=width, anchor="w", stretch=(col == "file"))
+        tree.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=PAD)
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        scroll.grid(row=1, column=2, sticky="ns", pady=PAD)
+        tree.configure(yscrollcommand=scroll.set)
+        note = ttk.Label(frame, foreground="#555")
+        note.grid(row=2, column=0, columnspan=2, sticky="w")
+
+        def fill(*_):
+            words = query.get().lower().split()
+            shown = [f for f in files if all(w in f["p"].lower() for w in words)]
+            tree.delete(*tree.get_children())
+            for i, f in enumerate(shown[:MAX_ROWS]):
+                changed = datetime.fromtimestamp(f["m"] / 1e9).strftime("%d %b %Y %H:%M")
+                tree.insert("", "end", iid=str(i), values=(f["p"], human_size(f["s"]), changed))
+            fill.shown = shown
+            if len(shown) > MAX_ROWS:
+                note.configure(text=f"Showing the first {MAX_ROWS} of {len(shown)} files. "
+                                    "Type part of a name to narrow the list.")
+            else:
+                note.configure(text=f"{len(shown)} files. Select one or more (Ctrl or Shift for several).")
+
+        def restore():
+            chosen = [fill.shown[int(i)]["p"] for i in tree.selection()]
+            if not chosen:
+                messagebox.showinfo("Safekeep", "Select the files to restore first.", parent=dialog)
+                return
+            if self._restore_into_chosen_folder(name, only=chosen, parent=dialog):
+                dialog.destroy()
+
+        query.trace_add("write", fill)
+        fill()
+        row = ttk.Frame(frame)
+        row.grid(row=3, column=0, columnspan=3, sticky="e", pady=(PAD, 0))
+        ttk.Button(row, text="Restore selected…", command=restore).pack(side="left", padx=PAD)
+        ttk.Button(row, text="Close", command=dialog.destroy).pack(side="left")
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+        entry.focus_set()
+        self._file_dialog = (dialog, tree, query, restore)  # reachable for tests
 
     def _verify_now(self):
         cfg = self._collect()
@@ -785,6 +881,17 @@ class App(tk.Tk):
         row.pack(anchor="e")
         ttk.Button(row, text="Import", command=ok).pack(side="left", padx=PAD)
         ttk.Button(row, text="Cancel", command=dialog.destroy).pack(side="left")
+
+    def _check_for_update(self):
+        version = updates.newer_version()
+        if version:
+            self.events.put(("update", version))
+
+    def _updates_changed(self):
+        self.cfg["check_updates"] = bool(self.v_updates.get())
+        saved = config.load()
+        saved["check_updates"] = self.cfg["check_updates"]
+        config.save(saved)
 
     def _key_saved_changed(self):
         self.cfg["recovery_key_saved"] = bool(self.v_key_saved.get())

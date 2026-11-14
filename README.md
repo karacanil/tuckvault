@@ -45,9 +45,24 @@ password (an SSH key); nothing is installed on it.
 3. **Security tab.** Save the recovery key somewhere that is neither this PC
    nor the backup destination. Without it the backups cannot be read if
    this PC or Windows account is lost.
-4. **Restore tab.** Lists the stored backups; restore one into a folder you
-   choose, or re-check everything that is stored.
+4. **Restore tab.** Lists the stored backups. **Restore everything…** copies
+   a whole backup into a folder you choose; **Restore chosen files…** lets
+   you search the backup and take out single files. **Check all backups
+   now** re-checks everything that is stored.
 5. **Activity tab.** What ran, when, and what went wrong if anything did.
+
+### What Safekeep tells you
+
+- A scheduled backup **failed** or could not read some files.
+- Backups have **stopped happening**: an item has gone twice its interval
+  without a successful backup, whatever the reason (the scheduled task was
+  switched off, the settings were damaged, a run is stuck). Windows checks
+  this once a day at noon.
+- A **newer version** exists. When the window opens it asks github.com for
+  the latest version number, at most once a day, and shows a link. Nothing
+  is downloaded or installed by itself, and you can switch the check off on
+  the Security tab. This is the only time Safekeep contacts anything other
+  than your backup destination.
 
 ### Where backups can go
 
@@ -73,6 +88,14 @@ password (an SSH key); nothing is installed on it.
 
 What it does not protect against is written down in [SECURITY.md](SECURITY.md).
 
+**How far to trust it.** The encryption uses standard, well-studied building
+blocks from the `cryptography` library, but the way they are put together
+and the storage format are Safekeep's own. That design has had one
+independent code review and no professional audit, and the project is
+young. Keep a second copy of anything you cannot afford to lose, and try a
+restore before you rely on it. Reviews of `safekeep/crypto.py`,
+`safekeep/engine.py` and `safekeep/agent.py` are very welcome.
+
 ## Command line
 
 The installed app includes `safekeep-cli.exe`; from source use `python -m safekeep`.
@@ -81,10 +104,13 @@ The installed app includes `safekeep-cli.exe`; from source use `python -m safeke
 safekeep-cli run                    back up everything now
 safekeep-cli verify                 re-hash everything stored
 safekeep-cli snapshots              list backups
+safekeep-cli files latest            list the files in a backup
 safekeep-cli restore latest D:\restore-here
+safekeep-cli restore latest D:\restore-here --only C:\Users\me\Documents\tax.xlsx
 safekeep-cli schedule apply|remove|status
 safekeep-cli key show|import <key>
 safekeep-cli test                   test the connection
+safekeep-cli watch                  say whether automatic backups are overdue
 ```
 
 ## Run from source
@@ -130,3 +156,7 @@ under the hash of its ciphertext, so unchanged files cost nothing on later
 runs. A backup ("snapshot") is an encrypted list of files and the chunks
 they consist of. Settings, history, log and the key live in
 `%APPDATA%\Safekeep`.
+
+## Licence
+
+[MIT](LICENSE). Use it, change it, share it.

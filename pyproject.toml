@@ -7,6 +7,7 @@ name = "safekeep"
 description = "Small automatic, encrypted, verified backups from a Windows PC to another computer or drive"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
 dependencies = ["cryptography>=42"]
 dynamic = ["version"]
 

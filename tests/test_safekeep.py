@@ -13,12 +13,12 @@ import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from safekeep import config, crypto, engine, keystore, paths, scheduler  # noqa: E402
+from safekeep import config, crypto, engine, keystore, paths, scheduler, updates, watch  # noqa: E402
 
 SECRET = b"TOP-SECRET-MARKER-9f2c "
 
@@ -558,6 +558,148 @@ class PerItemSchedules(Base):
         self.assertEqual(scheduler.task_for(self.vault_id), scheduler.task_name() + "-" + self.vault_id)
         now = datetime(2026, 11, 9, 21, 30)
         self.assertEqual(scheduler.next_due(self.cfg, now), datetime(2026, 11, 9, 22, 0))
+
+
+class ChosenFiles(Base):
+    def test_restore_one_file_and_one_folder(self):
+        snap = self.backup()["snapshot"]
+        listed = {f["p"]: f["s"] for f in engine.snapshot_files(snap, self.cfg)}
+        self.assertEqual(len(listed), 5)
+        self.assertEqual(listed[str(self.src / "a.txt")], len(SECRET) * 50)
+
+        out = self.tmp / "one"
+        r = engine.run_restore(snap, str(out), self.cfg, only=[str(self.src / "a.txt").upper()])
+        self.assertEqual((r["status"], r["files"]), ("success", 1), r)
+        got = [p for p in out.rglob("*") if p.is_file()]
+        self.assertEqual([p.name for p in got], ["a.txt"])
+        self.assertEqual(got[0].read_bytes(), (self.src / "a.txt").read_bytes())
+
+        out = self.tmp / "folder"
+        r = engine.run_restore(snap, str(out), self.cfg, only=[str(self.src / "sub")])
+        self.assertEqual((r["status"], r["files"]), ("success", 2), r)
+        self.assertEqual(sorted(p.name for p in out.rglob("*") if p.is_file()),
+                         sorted(["random.bin", "şifreler ünïcode.json"]))
+
+    def test_a_name_that_only_starts_the_same_is_not_included(self):
+        (self.src / "sub2").mkdir()
+        (self.src / "sub2" / "other.txt").write_bytes(b"x")
+        snap = self.backup()["snapshot"]
+        r = engine.run_restore(snap, str(self.tmp / "o"), self.cfg, only=[str(self.src / "sub")])
+        self.assertEqual(r["files"], 2, r)
+
+    def test_nothing_matching_fails_plainly(self):
+        snap = self.backup()["snapshot"]
+        r = engine.run_restore(snap, str(self.tmp / "o"), self.cfg, only=["C:\\nowhere\\x.txt"])
+        self.assertEqual(r["status"], "failed")
+        self.assertIn("None of the chosen files", r["error"])
+
+
+class OverdueAlarm(Base):
+    def setUp(self):
+        super().setUp()
+        self.cfg["schedule"].update(enabled=True, frequency="daily")
+        self.t0 = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
+
+    def test_not_overdue_until_two_runs_were_missed(self):
+        self.assertEqual(watch.overdue(self.cfg, self.t0 + timedelta(days=30)), [])  # never scheduled
+        watch.note_schedules(self.cfg, self.t0)
+        self.assertEqual(watch.overdue(self.cfg, self.t0 + timedelta(days=1, hours=23)), [])
+        late = watch.overdue(self.cfg, self.t0 + timedelta(days=3))
+        self.assertEqual([(x["path"], x["days"], x["never"]) for x in late], [(str(self.src), 3, True)])
+        self.assertIn("No successful backup of src for 3 days", watch.describe(late))
+
+    def test_a_successful_backup_resets_the_clock(self):
+        watch.note_schedules(self.cfg, self.t0)
+        r = self.backup()  # records success "now", long after t0
+        done = datetime.strptime(r["finished"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        self.assertEqual(watch.overdue(self.cfg, done + timedelta(days=1)), [])
+        self.assertEqual(len(watch.overdue(self.cfg, done + timedelta(days=2, minutes=1))), 1)
+
+    def test_failed_backups_do_not_count(self):
+        watch.note_schedules(self.cfg, self.t0)
+        self.cfg["destination"] = {"type": "local", "folder": ""}
+        self.backup(expect="failed")
+        self.assertEqual(len(watch.overdue(self.cfg, self.t0 + timedelta(days=3))), 1)
+
+    def test_switching_off_and_on_starts_fresh(self):
+        watch.note_schedules(self.cfg, self.t0)
+        self.cfg["schedule"]["enabled"] = False
+        watch.note_schedules(self.cfg, self.t0 + timedelta(days=40))
+        self.assertEqual(watch.overdue(self.cfg, self.t0 + timedelta(days=41)), [])
+        self.cfg["schedule"]["enabled"] = True
+        watch.note_schedules(self.cfg, self.t0 + timedelta(days=50))
+        self.assertEqual(watch.overdue(self.cfg, self.t0 + timedelta(days=51)), [])
+        self.assertEqual(len(watch.overdue(self.cfg, self.t0 + timedelta(days=53))), 1)
+
+    def test_slower_schedules_get_more_time(self):
+        self.assertEqual(watch.allowed_gap({"frequency": "hourly", "interval_hours": 1}), timedelta(hours=6))
+        self.assertEqual(watch.allowed_gap({"frequency": "hourly", "interval_hours": 12}), timedelta(hours=24))
+        self.assertEqual(watch.allowed_gap({"frequency": "weekly"}), timedelta(days=14))
+        self.assertEqual(watch.allowed_gap({"frequency": "monthly"}), timedelta(days=62))
+
+    def test_watch_command_notifies(self):
+        from unittest import mock
+        from safekeep import __main__ as cli, notify
+        config.save(self.cfg)
+        watch.note_schedules(self.cfg, datetime.now(timezone.utc) - timedelta(days=5))
+        with mock.patch.object(notify, "notify") as shown:
+            self.assertEqual(cli.main(["watch"]), 1)
+            self.assertEqual(shown.call_args[0][0], "Backups have stopped")
+            self.assertIn("5 days", shown.call_args[0][1])
+        self.backup()
+        with mock.patch.object(notify, "notify") as shown:
+            self.assertEqual(cli.main(["watch"]), 0)
+            shown.assert_not_called()
+
+    def test_damaged_settings_are_announced_not_ignored(self):
+        from unittest import mock
+        from safekeep import __main__ as cli, notify
+        paths.config_file().write_text("{ this is not json", encoding="utf-8")
+        self.assertTrue(config.is_damaged())
+        for argv in (["watch"], ["run", "--scheduled"]):
+            with mock.patch.object(notify, "notify") as shown:
+                self.assertEqual(cli.main(argv), 1)
+                self.assertIn("cannot read its settings", shown.call_args[0][0])
+        paths.config_file().unlink()
+        self.assertFalse(config.is_damaged())
+
+    def test_watch_task(self):
+        ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+        root = ET.fromstring(scheduler.watch_xml().split("?>", 1)[1])
+        self.assertTrue(root.find("t:Actions/t:Exec/t:Arguments", ns).text.endswith("watch"))
+        self.assertEqual(root.find("t:Settings/t:StartWhenAvailable", ns).text, "false")
+        self.assertIsNotNone(root.find("t:Triggers/t:CalendarTrigger/t:ScheduleByDay", ns))
+        self.assertEqual(scheduler.task_for(scheduler.WATCH), scheduler.task_name() + "-watch")
+
+
+class UpdateNotice(Base):
+    def check(self, tag, now=1_000_000.0):
+        from unittest import mock
+        with mock.patch.object(updates, "_fetch_latest", return_value=tag) as fetch:
+            return updates.newer_version(now=now), fetch.call_count
+
+    def test_newer_older_and_odd_answers(self):
+        from unittest import mock
+        with mock.patch.object(updates, "__version__", "1.2.0"):
+            day = 86400
+            self.assertEqual(self.check("v1.3.0", now=1 * day * 10), ("1.3.0", 1))
+            self.assertEqual(self.check("v1.2.0", now=2 * day * 10), (None, 1))
+            self.assertEqual(self.check("v1.1.9", now=3 * day * 10), (None, 1))
+            self.assertEqual(self.check("v1.10.0", now=4 * day * 10), ("1.10.0", 1))
+            for odd in ("latest", "v1.2", "<script>", None, 5, "v1.2.0\n"):
+                self.assertEqual(self.check(odd, now=(5 + len(str(odd))) * day * 100)[0], None, odd)
+
+    def test_asks_at_most_once_a_day_and_survives_being_offline(self):
+        from unittest import mock
+        with mock.patch.object(updates, "__version__", "1.2.0"):
+            self.assertEqual(self.check("v2.0.0", now=1000.0 + 86400), ("2.0.0", 1))
+            self.assertEqual(self.check("v9.9.9", now=2000.0 + 86400), ("2.0.0", 0))  # remembered
+            with mock.patch.object(updates, "_fetch_latest", side_effect=OSError("offline")):
+                self.assertIsNone(updates.newer_version(now=10 * 86400.0))
+
+    def test_only_ever_talks_to_the_fixed_https_address(self):
+        self.assertTrue(updates.LATEST_URL.startswith("https://api.github.com/repos/"))
+        self.assertTrue(updates.DOWNLOAD_PAGE.startswith("https://github.com/"))
 
 
 class Scheduling(unittest.TestCase):

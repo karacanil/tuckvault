@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.0
+
+**New**
+
+- Restore chosen files: search inside a backup and take out single files
+  or folders instead of the whole backup (`--only` on the command line,
+  and `safekeep-cli files` lists what a backup contains).
+- An alarm when backups quietly stop happening. Once a day Windows checks
+  that every automatically backed-up item had a successful backup within
+  twice its interval, and notifies you if not. The Backup tab shows an
+  "Overdue" line as well.
+- A notice when a newer version is available, with a link to the download
+  page. Nothing is downloaded by itself; it can be switched off on the
+  Security tab.
+- Damaged settings are announced instead of silently replaced by defaults.
+
+**Changed**
+
+- "Restore selected…" is now "Restore everything…".
+- Released under the MIT licence.
+- Dependencies are pinned to exact versions for repeatable builds.
+
 ## 1.1.0
 
 First packaged release.

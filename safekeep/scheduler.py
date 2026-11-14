@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from . import config, paths
+from . import config, paths, watch
 from .config import WEEKDAYS
 
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
@@ -29,6 +29,9 @@ _EPOCH = datetime(2025, 1, 1)
 
 def task_name() -> str:
     return os.environ.get("SAFEKEEP_TASK_NAME", r"Safekeep\Backup")
+
+
+WATCH = "watch"  # not a group: the daily check that backups are still happening
 
 
 def task_for(group_id: str) -> str:
@@ -117,24 +120,46 @@ def _trigger_xml(schedule: dict) -> str:
 
 def _runner():
     """(command, arguments, working directory) for the scheduled run."""
+    command, prefix, workdir = _program()
+    return command, prefix + "run --scheduled", workdir
+
+
+def _program():
+    """(command, argument prefix, working directory) to start Safekeep without a console."""
     exe = Path(sys.executable)
     if paths.is_frozen():  # the installed app: Safekeep.exe itself, which has no console window
         gui_exe = exe.with_name("Safekeep.exe")
-        return str(gui_exe if gui_exe.exists() else exe), "run --scheduled", str(paths.project_root())
+        return str(gui_exe if gui_exe.exists() else exe), "", str(paths.project_root())
     pythonw = exe.with_name("pythonw.exe")
-    return str(pythonw if pythonw.exists() else exe), "-m safekeep run --scheduled", str(paths.project_root())
+    return str(pythonw if pythonw.exists() else exe), "-m safekeep ", str(paths.project_root())
+
+
+def watch_xml() -> str:
+    """The daily check for backups that stopped happening.
+
+    Deliberately not caught up after the PC was off: by the next noon the
+    backups that were due have had their chance to run first.
+    """
+    command, prefix, workdir = _program()
+    schedule = {"enabled": True, "frequency": "daily", "time": "12:00"}
+    return _task_xml(schedule, command, prefix + "watch", workdir, catch_up=False,
+                     description="Safekeep check that automatic backups are still happening.")
 
 
 def task_xml(schedule: dict, group_id: str = config.DEFAULT_GROUP) -> str:
     command, arguments, workdir = _runner()
-    arguments += " --only " + group_id
+    return _task_xml(schedule, command, arguments + " --only " + group_id, workdir)
+
+
+def _task_xml(schedule, command, arguments, workdir, catch_up=True,
+              description="Safekeep automatic backup. Managed by the Safekeep app.") -> str:
     user = os.environ.get("USERNAME", "")
     domain = os.environ.get("USERDOMAIN", "")
     user_id = f"{domain}\\{user}" if domain else user
     return f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Safekeep automatic backup. Managed by the Safekeep app.</Description>
+    <Description>{escape(description)}</Description>
   </RegistrationInfo>
   <Triggers>{_trigger_xml(schedule)}</Triggers>
   <Principals>
@@ -148,7 +173,7 @@ def task_xml(schedule: dict, group_id: str = config.DEFAULT_GROUP) -> str:
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <StartWhenAvailable>true</StartWhenAvailable>
+    <StartWhenAvailable>{"true" if catch_up else "false"}</StartWhenAvailable>
     <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
     <AllowStartOnDemand>true</AllowStartOnDemand>
     <Enabled>true</Enabled>
@@ -187,7 +212,7 @@ def installed() -> set:
 def is_active(cfg: dict) -> bool:
     """True if every schedule in the settings is registered with Windows."""
     wanted = {task_for(g["id"]) for g in config.active_groups(cfg)}
-    return bool(wanted) and wanted <= installed()
+    return bool(wanted) and (wanted | {task_for(WATCH)}) <= installed()
 
 
 def next_due(cfg: dict, now: datetime = None):
@@ -220,16 +245,19 @@ def apply(cfg: dict) -> None:
     """Make Windows Task Scheduler match the schedules in the settings."""
     if sys.platform != "win32":
         raise OSError("Automatic scheduling is only implemented for Windows.")
-    wanted = {task_for(g["id"]): g for g in config.active_groups(cfg)}
+    wanted = {task_for(g["id"]): task_xml(g["schedule"], g["id"]) for g in config.active_groups(cfg)}
+    if wanted:
+        wanted[task_for(WATCH)] = watch_xml()
     for name in installed() - set(wanted):
         _delete(name)
-    for name, group in wanted.items():
+    for name, xml in wanted.items():
         fd, tmp = tempfile.mkstemp(suffix=".xml")
         try:
             with os.fdopen(fd, "w", encoding="utf-16") as f:
-                f.write(task_xml(group["schedule"], group["id"]))
+                f.write(xml)
             res = _schtasks("/Create", "/TN", name, "/XML", tmp, "/F")
         finally:
             os.remove(tmp)
         if res.returncode != 0:
             raise OSError("Windows refused to schedule the backup: " + (res.stderr or res.stdout).strip())
+    watch.note_schedules(cfg)

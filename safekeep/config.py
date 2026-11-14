@@ -31,6 +31,8 @@ DEFAULTS = {
     "keep_last": 30,
     "verify_every_days": 7,
     "recovery_key_saved": False,
+    # Ask github.com for the newest version number when the window opens.
+    "check_updates": True,
 }
 DEFAULT_GROUP = "default"
 
@@ -119,6 +121,17 @@ def _merge(base: dict, extra: dict) -> dict:
 
 def load() -> dict:
     return _merge(copy.deepcopy(DEFAULTS), read_json(paths.config_file(), {}))
+
+
+def is_damaged() -> bool:
+    """True if the settings file exists but cannot be read (then load() returns defaults)."""
+    try:
+        with open(paths.config_file(), "r", encoding="utf-8") as f:
+            return not isinstance(json.load(f), dict)
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError):
+        return True
 
 
 def save(cfg: dict) -> None:
