@@ -18,15 +18,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from safekeep import config, crypto, engine, keystore, paths, scheduler, updates, watch  # noqa: E402
+from tuckvault import config, crypto, engine, keystore, paths, scheduler, updates, watch  # noqa: E402
 
 SECRET = b"TOP-SECRET-MARKER-9f2c "
 
 
 class Base(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="safekeep-test-"))
-        os.environ["SAFEKEEP_HOME"] = str(self.tmp / "home")
+        self.tmp = Path(tempfile.mkdtemp(prefix="tuckvault-test-"))
+        os.environ["TUCKVAULT_HOME"] = str(self.tmp / "home")
         self.src = self.tmp / "src"
         self.repo = self.tmp / "repo"
         (self.src / "sub" / "deep").mkdir(parents=True)
@@ -43,7 +43,7 @@ class Base(unittest.TestCase):
         self.cfg["verify_every_days"] = 0
 
     def tearDown(self):
-        os.environ.pop("SAFEKEEP_HOME", None)
+        os.environ.pop("TUCKVAULT_HOME", None)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def backup(self, expect="success"):
@@ -211,7 +211,7 @@ class Protection(Base):
             crypto.decode_recovery_key(bad)
 
     def test_agent_rejects_blob_with_wrong_hash(self):
-        from safekeep.remote import Remote, RemoteError
+        from tuckvault.remote import Remote, RemoteError
         with Remote(self.cfg["destination"]) as remote:
             remote.open(create=True)
             with self.assertRaises(RemoteError):
@@ -279,7 +279,7 @@ class UntrustedStorage(Base):
     def test_oversized_reply_is_refused(self):
         import io
         import struct
-        from safekeep import remote
+        from tuckvault import remote
 
         class Fake:
             stdin = io.BytesIO()
@@ -318,7 +318,7 @@ class UntrustedStorage(Base):
         import io
         import json
         import struct
-        from safekeep import remote
+        from tuckvault import remote
 
         class Fake:
             stdin, stderr = io.BytesIO(), io.BytesIO()
@@ -339,7 +339,7 @@ class UntrustedStorage(Base):
         return r
 
     def test_file_names_from_storage_cannot_leave_the_cache_folder(self):
-        from safekeep import remote
+        from tuckvault import remote
         for bad in ("..\\..\\key.bin", "../../key.bin", "C:\\Users\\x\\doc.snap", "a/b.snap",
                     "20260101T000000.000000Z-abcdef.snap\n", "x.txt", ""):
             with self.assertRaises(remote.RemoteError, msg=bad):
@@ -475,7 +475,7 @@ class Destinations(Base):
 
     def test_missing_drive_is_reported_plainly(self):
         free = next(f"{c}:\\" for c in "ZYXWVUTSRQ" if not os.path.exists(f"{c}:\\"))
-        self.cfg["destination"] = {"type": "local", "folder": free + "safekeep"}
+        self.cfg["destination"] = {"type": "local", "folder": free + "tuckvault"}
         r = self.backup(expect="failed")
         self.assertIn("is not connected", r["error"])
 
@@ -639,7 +639,7 @@ class OverdueAlarm(Base):
 
     def test_watch_command_notifies(self):
         from unittest import mock
-        from safekeep import __main__ as cli, notify
+        from tuckvault import __main__ as cli, notify
         config.save(self.cfg)
         watch.note_schedules(self.cfg, datetime.now(timezone.utc) - timedelta(days=5))
         with mock.patch.object(notify, "notify") as shown:
@@ -653,7 +653,7 @@ class OverdueAlarm(Base):
 
     def test_damaged_settings_are_announced_not_ignored(self):
         from unittest import mock
-        from safekeep import __main__ as cli, notify
+        from tuckvault import __main__ as cli, notify
         paths.config_file().write_text("{ this is not json", encoding="utf-8")
         self.assertTrue(config.is_damaged())
         for argv in (["watch"], ["run", "--scheduled"]):
@@ -700,6 +700,44 @@ class UpdateNotice(Base):
     def test_only_ever_talks_to_the_fixed_https_address(self):
         self.assertTrue(updates.LATEST_URL.startswith("https://api.github.com/repos/"))
         self.assertTrue(updates.DOWNLOAD_PAGE.startswith("https://github.com/"))
+
+
+class Renamed(unittest.TestCase):
+    """The program was called Safekeep until 1.2."""
+
+    def test_old_settings_folder_is_taken_over_once(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            old = Path(tmp) / "Safekeep"
+            old.mkdir()
+            (old / "config.json").write_text('{"keep_last": 7}', encoding="utf-8")
+            (old / "key.bin").write_bytes(b"k")
+            (old / "safekeep.log").write_text("x", encoding="utf-8")
+            env = {k: v for k, v in os.environ.items() if k != "TUCKVAULT_HOME"}
+            env["APPDATA"] = tmp
+            with mock.patch.dict(os.environ, env, clear=True):
+                home = paths.app_dir()
+                self.assertEqual(home, Path(tmp) / "Tuckvault")
+                self.assertFalse(old.exists())
+                self.assertEqual(sorted(p.name for p in home.iterdir()),
+                                 ["config.json", "key.bin", "tuckvault.log"])
+                self.assertEqual(config.load()["keep_last"], 7)
+                old.mkdir()  # a later leftover must never replace what is in use
+                (old / "config.json").write_text('{"keep_last": 1}', encoding="utf-8")
+                self.assertEqual(config.load()["keep_last"], 7)
+
+    def test_old_backups_stay_readable(self):
+        # The key derivation label is part of the storage format and keeps the old name.
+        import hashlib, hmac
+        self.assertEqual(crypto._derive(b"m" * 32, b"blob"),
+                         hmac.new(b"m" * 32, b"safekeep/v1/blob", hashlib.sha256).digest())
+
+    def test_old_scheduled_tasks_are_found_only_outside_tests(self):
+        from unittest import mock
+        for name in ("TUCKVAULT_TASK_NAME", "TUCKVAULT_HOME"):
+            with mock.patch.dict(os.environ, {name: "x"}),                     mock.patch.object(scheduler, "_tasks_named", side_effect=AssertionError("asked Windows")):
+                self.assertEqual(scheduler._legacy(), set())
+        self.assertEqual(scheduler.LEGACY_TASKS, "Safekeep\\Backup")
 
 
 class Scheduling(unittest.TestCase):

@@ -4,7 +4,7 @@
 #
 #     bash tools/after_going_public.sh
 set -u
-R=repos/karacanil/safekeep
+R=repos/karacanil/tuckvault
 
 echo "Private vulnerability reporting"
 gh api -X PUT "$R/private-vulnerability-reporting" >/dev/null && echo "  on"

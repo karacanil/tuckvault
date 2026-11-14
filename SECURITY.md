@@ -1,14 +1,14 @@
 # Security
 
-## What Safekeep assumes
+## What Tuckvault assumes
 
 - **Your PC and Windows account are trusted.** The backup key is stored in
-  `%APPDATA%\Safekeep\key.bin`, wrapped with Windows DPAPI so that only
+  `%APPDATA%\Tuckvault\key.bin`, wrapped with Windows DPAPI so that only
   your Windows account can unwrap it. That is what lets scheduled backups
   run without asking for a password.
 - **The backup destination is not trusted** with the content of your
   files. It may be read by others, lose data, or return wrong data;
-  Safekeep is built to keep the content private and to notice the rest.
+  Tuckvault is built to keep the content private and to notice the rest.
 
 ## What is protected
 
@@ -17,10 +17,10 @@
 | Content and names of your files | AES-256-GCM, encrypted on the PC. Keys for file data, for backup indexes and for nonces are derived separately from one 256-bit master key. |
 | Integrity of stored data | Each piece is named by the SHA-256 of its ciphertext and authenticated by GCM. The destination re-hashes on a schedule; the PC re-verifies every byte on restore. |
 | Integrity of a backup's file list | Encrypted and authenticated; it also carries its own name, so an old backup cannot be presented as a newer one. |
-| Removal of backups | Safekeep remembers which backups it has seen, reports any that disappear without it having removed them, and puts their index back if the data is still there. |
-| A swapped or emptied destination | Safekeep remembers which set of backups belongs to a destination and refuses to carry on if it finds an empty or different one, until you say so. |
+| Removal of backups | Tuckvault remembers which backups it has seen, reports any that disappear without it having removed them, and puts their index back if the data is still there. |
+| A swapped or emptied destination | Tuckvault remembers which set of backups belongs to a destination and refuses to carry on if it finds an empty or different one, until you say so. |
 | What the destination sends back | Treated as untrusted: names, sizes and identifiers are validated before they are used on the PC. |
-| The connection | SSH with strict host key checking and no agent or port forwarding. Safekeep never accepts an unknown host by itself and never sends a password. |
+| The connection | SSH with strict host key checking and no agent or port forwarding. Tuckvault never accepts an unknown host by itself and never sends a password. |
 
 ## What is not protected
 
@@ -46,7 +46,7 @@
 - Downloads are **not code-signed** yet. Compare them against
   `SHA256SUMS.txt` from the same release.
 
-## What Safekeep sends anywhere
+## What Tuckvault sends anywhere
 
 Your backup data goes to the destination you chose and nowhere else. The
 only other connection is the optional version check: when the window opens
@@ -62,7 +62,7 @@ be switched off on the Security tab. Scheduled backups never do it.
   backup and an "Overdue" line.
 - A backup computer that stalls without closing the connection can hold a
   backup run for a long time before it gives up.
-- `safekeep-cli key import <key>` takes the key on the command line, where
+- `tuckvault-cli key import <key>` takes the key on the command line, where
   shell history can keep it, and the Copy button puts it on the clipboard.
   Prefer the import dialog in the window.
 - One backup can list roughly a million files; beyond that the index is
@@ -80,6 +80,6 @@ and exercises the built installer before publishing.
 ## Reporting a problem
 
 Report it privately through
-[a security advisory](https://github.com/karacanil/safekeep/security/advisories/new).
+[a security advisory](https://github.com/karacanil/tuckvault/security/advisories/new).
 Please do not put details in a public issue. You can expect a first answer
 within a week.

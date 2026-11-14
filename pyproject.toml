@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "safekeep"
+name = "tuckvault"
 description = "Small automatic, encrypted, verified backups from a Windows PC to another computer or drive"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,19 +12,19 @@ dependencies = ["cryptography>=42"]
 dynamic = ["version"]
 
 [project.scripts]
-safekeep = "safekeep.__main__:main"
+tuckvault = "tuckvault.__main__:main"
 
 [project.gui-scripts]
-safekeep-gui = "safekeep.gui:main"
+tuckvault-gui = "tuckvault.gui:main"
 
 [tool.setuptools]
-packages = ["safekeep"]
+packages = ["tuckvault"]
 
 [tool.setuptools.dynamic]
-version = { attr = "safekeep.__version__" }
+version = { attr = "tuckvault.__version__" }
 
 [tool.setuptools.package-data]
-safekeep = ["assets/*"]
+tuckvault = ["assets/*"]
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv", "build", "dist"]

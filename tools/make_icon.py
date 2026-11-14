@@ -1,4 +1,4 @@
-"""Draws the Safekeep icon and writes safekeep/assets/safekeep.ico and .png.
+"""Draws the Tuckvault icon and writes tuckvault/assets/tuckvault.ico and .png.
 
 Run after changing the design (needs Pillow, a development-only dependency):
 
@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw
 SIZE = 1024
 TOP, BOTTOM = (20, 184, 166), (29, 78, 216)  # teal to blue
 CHECK = (23, 92, 190)
-OUT = Path(__file__).resolve().parent.parent / "safekeep" / "assets"
+OUT = Path(__file__).resolve().parent.parent / "tuckvault" / "assets"
 
 
 def _bezier(p0, p1, p2, steps=40):
@@ -51,10 +51,10 @@ def draw() -> Image.Image:
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     icon = draw()
-    icon.resize((256, 256), Image.LANCZOS).save(OUT / "safekeep.png")
-    icon.save(OUT / "safekeep.ico",
+    icon.resize((256, 256), Image.LANCZOS).save(OUT / "tuckvault.png")
+    icon.save(OUT / "tuckvault.ico",
               sizes=[(s, s) for s in (16, 20, 24, 32, 40, 48, 64, 128, 256)])
-    print("wrote", OUT / "safekeep.ico", "and safekeep.png")
+    print("wrote", OUT / "tuckvault.ico", "and tuckvault.png")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ labels: bug
 
 **Details**
 
-- Safekeep version (bottom of the Security tab):
+- Tuckvault version (bottom of the Security tab):
 - Windows version:
 - Destination: another computer over SSH / a folder or drive (USB, network share, cloud folder)
 - The message shown, or the relevant lines from the log (Activity tab, "Open log file").

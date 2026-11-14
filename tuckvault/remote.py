@@ -13,7 +13,7 @@ import sys
 import threading
 from pathlib import Path
 
-MARKER = b"SAFEKEEP-AGENT 1\n"
+MARKER = b"TUCKVAULT-AGENT 1\n"
 # The storage side is not trusted: never let a reply make this PC allocate without bound.
 MAX_HEADER = 64 * 1024 * 1024
 MAX_PAYLOAD = 512 * 1024 * 1024
@@ -274,7 +274,7 @@ class Remote:
     # -- convenience -----------------------------------------------------
     def open(self, create: bool):
         repo = folder_of(self.dest) if self.dest.get("type") == "local" else (
-            self.dest.get("path") or "safekeep-repo")
+            self.dest.get("path") or "tuckvault-repo")
         info = self.call("open", repo=repo, create=create)[0]
         meta = info.get("meta")
         if meta is not None and not (

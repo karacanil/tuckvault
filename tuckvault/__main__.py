@@ -22,7 +22,7 @@ def _print_result(result: dict) -> int:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="safekeep", description="Encrypted, verified backups over SSH.")
+    parser = argparse.ArgumentParser(prog="tuckvault", description="Encrypted, verified backups over SSH.")
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("gui", help="open the window (default)")
@@ -58,9 +58,9 @@ def main(argv=None) -> int:
     from . import config, engine, keystore, notify, scheduler, watch
     if args.cmd == "watch" or (args.cmd == "run" and args.scheduled):
         if config.is_damaged():
-            notify.notify("Safekeep cannot read its settings",
+            notify.notify("Tuckvault cannot read its settings",
                           "The settings file is damaged, so automatic backups are not running. "
-                          "Open Safekeep and choose what to back up again.")
+                          "Open Tuckvault and choose what to back up again.")
             return 1
     cfg = config.load()
 
@@ -68,7 +68,7 @@ def main(argv=None) -> int:
         late = watch.overdue(cfg)
         if late:
             notify.notify("Backups have stopped", watch.describe(late)
-                          + " Open Safekeep to see what is wrong.")
+                          + " Open Tuckvault to see what is wrong.")
         _out(watch.describe(late) or "Automatic backups are up to date.")
         return 1 if late else 0
 
@@ -81,7 +81,7 @@ def main(argv=None) -> int:
         if args.scheduled:
             if result["status"] == "skipped" and "already running" in result.get("error", ""):
                 result = dict(result, status="failed", error="A scheduled backup did not run "
-                              "because another Safekeep operation was still busy after two hours.")
+                              "because another Tuckvault operation was still busy after two hours.")
             notify.notify_result(result)
         return _print_result(result)
     if args.cmd == "verify":
@@ -134,7 +134,7 @@ def main(argv=None) -> int:
             _out(keystore.recovery_key() or "This PC has no backup key yet.")
             return 0
         if not args.value:
-            _out("usage: safekeep key import <recovery key>")
+            _out("usage: tuckvault key import <recovery key>")
             return 1
         try:
             keystore.import_recovery_key(args.value)

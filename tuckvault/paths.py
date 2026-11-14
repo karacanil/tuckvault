@@ -1,4 +1,4 @@
-"""Where Safekeep keeps its own files on this PC."""
+"""Where Tuckvault keeps its own files on this PC."""
 
 import os
 import re
@@ -7,15 +7,31 @@ from pathlib import Path
 
 
 def app_dir() -> Path:
-    override = os.environ.get("SAFEKEEP_HOME")
+    override = os.environ.get("TUCKVAULT_HOME")
     if override:
         d = Path(override)
     elif sys.platform == "win32":
-        d = Path(os.environ.get("APPDATA", Path.home())) / "Safekeep"
+        d = Path(os.environ.get("APPDATA", Path.home())) / "Tuckvault"
+        _adopt(d.with_name("Safekeep"), d)
     else:
-        d = Path.home() / ".config" / "safekeep"
+        d = Path.home() / ".config" / "tuckvault"
+        _adopt(d.with_name("safekeep"), d)
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _adopt(old: Path, new: Path) -> None:
+    """Take over the settings, key and history from before the program was renamed (1.2 and older)."""
+    if new.exists() or not old.is_dir():
+        return
+    try:
+        old.rename(new)
+    except OSError:
+        return  # in use or not allowed: start fresh rather than fail; the old folder stays untouched
+    try:
+        (new / "safekeep.log").rename(new / "tuckvault.log")
+    except OSError:
+        pass
 
 
 def config_file() -> Path:
@@ -35,7 +51,7 @@ def key_file() -> Path:
 
 
 def log_file() -> Path:
-    return app_dir() / "safekeep.log"
+    return app_dir() / "tuckvault.log"
 
 
 def lock_file() -> Path:
@@ -51,7 +67,7 @@ def snapshot_cache(repo_id: str) -> Path:
 
 
 def is_frozen() -> bool:
-    """True in the packaged Windows build (Safekeep.exe), False when run from source."""
+    """True in the packaged Windows build (Tuckvault.exe), False when run from source."""
     return bool(getattr(sys, "frozen", False))
 
 
@@ -72,4 +88,4 @@ def system_exe(name: str) -> str:
 
 
 def icon_file() -> Path:
-    return Path(__file__).resolve().parent / "assets" / "safekeep.ico"
+    return Path(__file__).resolve().parent / "assets" / "tuckvault.ico"

@@ -28,6 +28,6 @@ jobs:
       - name: Tests
         run: python -W error::ResourceWarning -m unittest discover -s tests -v
       - name: Static security scan (medium and above fail the build)
-        run: python -m bandit -q -r safekeep -ll
+        run: python -m bandit -q -r tuckvault -ll
       - name: Known vulnerabilities in dependencies
         run: python -m pip_audit -r requirements.txt

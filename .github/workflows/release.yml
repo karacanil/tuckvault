@@ -26,9 +26,9 @@ jobs:
       - name: The tag must match the version in the code
         shell: pwsh
         run: |
-          $version = python -c "import safekeep; print(safekeep.__version__)"
+          $version = python -c "import tuckvault; print(tuckvault.__version__)"
           if ("v$version" -ne "${{ github.ref_name }}") {
-            throw "Tag ${{ github.ref_name }} does not match safekeep.__version__ $version"
+            throw "Tag ${{ github.ref_name }} does not match tuckvault.__version__ $version"
           }
           "VERSION=$version" >> $env:GITHUB_ENV
 
@@ -36,17 +36,17 @@ jobs:
         run: python -W error::ResourceWarning -m unittest discover -s tests
       - name: Security checks
         run: |
-          python -m bandit -q -r safekeep -ll
+          python -m bandit -q -r tuckvault -ll
           python -m pip_audit -r requirements.txt
 
       - name: Build the app
-        run: python -m PyInstaller --noconfirm --clean --log-level WARN packaging/safekeep.spec
+        run: python -m PyInstaller --noconfirm --clean --log-level WARN packaging/tuckvault.spec
       - name: Check the built app works
-        run: python tools/smoke_test_build.py dist/Safekeep
+        run: python tools/smoke_test_build.py dist/Tuckvault
 
       - name: Portable zip
         shell: pwsh
-        run: Compress-Archive -Path dist/Safekeep -DestinationPath "dist/Safekeep-$env:VERSION-windows-portable.zip"
+        run: Compress-Archive -Path dist/Tuckvault -DestinationPath "dist/Tuckvault-$env:VERSION-windows-portable.zip"
 
       - name: Installer
         shell: pwsh
@@ -59,21 +59,21 @@ jobs:
       - name: Check the installer installs, works and uninstalls
         shell: pwsh
         run: |
-          $setup = "dist\Safekeep-$env:VERSION-setup.exe"
-          $target = "$env:RUNNER_TEMP\SafekeepInstalled"
+          $setup = "dist\Tuckvault-$env:VERSION-setup.exe"
+          $target = "$env:RUNNER_TEMP\TuckvaultInstalled"
           Start-Process $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=$target" -Wait
           python tools/smoke_test_build.py $target
           if ($LASTEXITCODE -ne 0) { throw "installed app failed the smoke test" }
           Start-Process "$target\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
           Start-Sleep 3
-          if (Test-Path "$target\Safekeep.exe") { throw "uninstall left the program behind" }
+          if (Test-Path "$target\Tuckvault.exe") { throw "uninstall left the program behind" }
 
       - name: Checksums
         shell: pwsh
         run: |
           Set-Location dist
           # Unix line endings, so "sha256sum -c" accepts the file as well
-          $lines = Get-ChildItem "Safekeep-$env:VERSION-*" | ForEach-Object {
+          $lines = Get-ChildItem "Tuckvault-$env:VERSION-*" | ForEach-Object {
             "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
           }
           [IO.File]::WriteAllText("$PWD\SHA256SUMS.txt", ($lines -join "`n") + "`n")
@@ -89,7 +89,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" `
-            "dist/Safekeep-$env:VERSION-setup.exe" `
-            "dist/Safekeep-$env:VERSION-windows-portable.zip" `
+            "dist/Tuckvault-$env:VERSION-setup.exe" `
+            "dist/Tuckvault-$env:VERSION-windows-portable.zip" `
             "dist/SHA256SUMS.txt" `
-            --title "Safekeep $env:VERSION" --notes-file "$env:RUNNER_TEMP\notes.md" --verify-tag
+            --title "Tuckvault $env:VERSION" --notes-file "$env:RUNNER_TEMP\notes.md" --verify-tag

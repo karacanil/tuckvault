@@ -2,7 +2,7 @@
 
 A failed backup announces itself. A backup that never starts does not:
 the scheduled task was disabled, the settings file got damaged, a run is
-stuck. Once a day Windows starts `safekeep watch`, which compares the last
+stuck. Once a day Windows starts `tuckvault watch`, which compares the last
 successful backup of every automatically backed-up item with how often it
 is supposed to run, and raises a notification when one is long overdue.
 """

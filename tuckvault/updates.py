@@ -1,4 +1,4 @@
-"""Tells the user when a newer Safekeep has been released.
+"""Tells the user when a newer Tuckvault has been released.
 
 Only ever asks GitHub for the newest version number and shows a notice.
 Nothing is downloaded or installed; the user follows the link themselves.
@@ -12,8 +12,8 @@ import urllib.request
 
 from . import __version__, config
 
-LATEST_URL = "https://api.github.com/repos/karacanil/safekeep/releases/latest"
-DOWNLOAD_PAGE = "https://github.com/karacanil/safekeep/releases/latest"
+LATEST_URL = "https://api.github.com/repos/karacanil/tuckvault/releases/latest"
+DOWNLOAD_PAGE = "https://github.com/karacanil/tuckvault/releases/latest"
 _TAG = re.compile(r"v?(\d{1,4})\.(\d{1,4})\.(\d{1,4})")
 _DAY = 24 * 3600
 
@@ -25,7 +25,7 @@ def _numbers(version: str):
 
 def _fetch_latest(timeout: float):
     request = urllib.request.Request(LATEST_URL, headers={
-        "Accept": "application/vnd.github+json", "User-Agent": "Safekeep-update-check"})
+        "Accept": "application/vnd.github+json", "User-Agent": "Tuckvault-update-check"})
     # Fixed https address, small bounded read, parsed as JSON only.
     with urllib.request.urlopen(request, timeout=timeout) as resp:  # nosec B310
         return json.loads(resp.read(200_000)).get("tag_name")

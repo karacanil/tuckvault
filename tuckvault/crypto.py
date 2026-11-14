@@ -31,6 +31,8 @@ class IntegrityError(Exception):
 
 
 def _derive(master: bytes, label: bytes) -> bytes:
+    # "safekeep" is the name this program had until 1.2. The label is part of
+    # the storage format: changing it would make every existing backup unreadable.
     return hmac.new(master, b"safekeep/v1/" + label, hashlib.sha256).digest()
 
 
@@ -71,7 +73,7 @@ class Keys:
         if sha256_hex(blob) != name:
             raise IntegrityError(f"blob {name[:12]}… does not match its hash")
         if len(blob) < 5 + 12 + 16 or blob[:4] != BLOB_MAGIC:
-            raise IntegrityError(f"blob {name[:12]}… is not a Safekeep blob")
+            raise IntegrityError(f"blob {name[:12]}… is not a Tuckvault blob")
         header, nonce, ct = blob[:5], blob[5:17], blob[17:]
         try:
             body = self._chunk.decrypt(nonce, ct, header)
@@ -87,7 +89,7 @@ class Keys:
 
     def open_snapshot(self, raw: bytes) -> dict:
         if len(raw) < 4 + 12 + 16 or raw[:4] != SNAP_MAGIC:
-            raise IntegrityError("not a Safekeep snapshot")
+            raise IntegrityError("not a Tuckvault snapshot")
         try:
             body = self._snap.decrypt(raw[4:16], raw[16:], SNAP_MAGIC)
         except InvalidTag:

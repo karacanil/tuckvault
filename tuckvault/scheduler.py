@@ -1,7 +1,7 @@
 """Automatic runs through Windows Task Scheduler.
 
-Nothing of Safekeep stays running between backups: Windows starts
-`pythonw -m safekeep run --scheduled --only <group>` at the chosen times,
+Nothing of Tuckvault stays running between backups: Windows starts
+`pythonw -m tuckvault run --scheduled --only <group>` at the chosen times,
 and starts it as soon as possible afterwards if the PC was off at that
 moment. There is one task for the items on the general schedule and one
 for each item that has a schedule of its own.
@@ -28,9 +28,10 @@ _EPOCH = datetime(2025, 1, 1)
 
 
 def task_name() -> str:
-    return os.environ.get("SAFEKEEP_TASK_NAME", r"Safekeep\Backup")
+    return os.environ.get("TUCKVAULT_TASK_NAME", r"Tuckvault\Backup")
 
 
+LEGACY_TASKS = r"Safekeep\Backup"  # what the tasks were called before the program was renamed
 WATCH = "watch"  # not a group: the daily check that backups are still happening
 
 
@@ -125,13 +126,13 @@ def _runner():
 
 
 def _program():
-    """(command, argument prefix, working directory) to start Safekeep without a console."""
+    """(command, argument prefix, working directory) to start Tuckvault without a console."""
     exe = Path(sys.executable)
-    if paths.is_frozen():  # the installed app: Safekeep.exe itself, which has no console window
-        gui_exe = exe.with_name("Safekeep.exe")
+    if paths.is_frozen():  # the installed app: Tuckvault.exe itself, which has no console window
+        gui_exe = exe.with_name("Tuckvault.exe")
         return str(gui_exe if gui_exe.exists() else exe), "", str(paths.project_root())
     pythonw = exe.with_name("pythonw.exe")
-    return str(pythonw if pythonw.exists() else exe), "-m safekeep ", str(paths.project_root())
+    return str(pythonw if pythonw.exists() else exe), "-m tuckvault ", str(paths.project_root())
 
 
 def watch_xml() -> str:
@@ -143,7 +144,7 @@ def watch_xml() -> str:
     command, prefix, workdir = _program()
     schedule = {"enabled": True, "frequency": "daily", "time": "12:00"}
     return _task_xml(schedule, command, prefix + "watch", workdir, catch_up=False,
-                     description="Safekeep check that automatic backups are still happening.")
+                     description="Tuckvault check that automatic backups are still happening.")
 
 
 def task_xml(schedule: dict, group_id: str = config.DEFAULT_GROUP) -> str:
@@ -152,7 +153,7 @@ def task_xml(schedule: dict, group_id: str = config.DEFAULT_GROUP) -> str:
 
 
 def _task_xml(schedule, command, arguments, workdir, catch_up=True,
-              description="Safekeep automatic backup. Managed by the Safekeep app.") -> str:
+              description="Tuckvault automatic backup. Managed by the Tuckvault app.") -> str:
     user = os.environ.get("USERNAME", "")
     domain = os.environ.get("USERDOMAIN", "")
     user_id = f"{domain}\\{user}" if domain else user
@@ -198,15 +199,26 @@ def _schtasks(*args):
 
 
 def installed() -> set:
-    """Names of the Safekeep backup tasks Windows currently has."""
+    """Names of the Tuckvault backup tasks Windows currently has."""
     if sys.platform != "win32":
         return set()
+    return _tasks_named(task_name())
+
+
+def _tasks_named(name: str) -> set:
     res = _schtasks("/Query", "/FO", "CSV", "/NH")
-    base, found = "\\" + task_name(), set()
+    base, found = "\\" + name, set()
     for row in csv.reader(res.stdout.splitlines()):
         if row and (row[0] == base or row[0].startswith(base + "-")):
             found.add(row[0][1:])
     return found
+
+
+def _legacy() -> set:
+    """Tasks left by a version from before the rename. They would start a program that is gone."""
+    if sys.platform != "win32" or "TUCKVAULT_TASK_NAME" in os.environ or "TUCKVAULT_HOME" in os.environ:
+        return set()  # tests and trial runs with their own settings leave the real tasks alone
+    return _tasks_named(LEGACY_TASKS)
 
 
 def is_active(cfg: dict) -> bool:
@@ -228,14 +240,17 @@ def _delete(name: str) -> None:
 
 
 def remove() -> None:
-    for name in installed():
+    for name in installed() | _legacy():
         _delete(name)
 
 
 def refresh(cfg: dict) -> None:
     """Re-register existing tasks, so they follow the app if its folder moved or it was updated."""
     try:
-        if installed():
+        old = _legacy()
+        for name in old:
+            _delete(name)
+        if old or installed():
             apply(cfg)
     except OSError:
         pass

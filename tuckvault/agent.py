@@ -1,8 +1,8 @@
-"""Safekeep storage agent.
+"""Tuckvault storage agent.
 
 This file runs on the machine that *stores* the backups. The client sends
 its source over SSH and executes it with the system python3, so it must
-stay standard-library only and must not import anything from safekeep.
+stay standard-library only and must not import anything from tuckvault.
 
 The agent never sees plaintext or keys. It stores opaque blobs named by
 the SHA-256 of their content, and refuses any blob whose content does not
@@ -30,7 +30,7 @@ try:
 except ImportError:
     msvcrt = None
 
-MARKER = b"SAFEKEEP-AGENT 1\n"
+MARKER = b"TUCKVAULT-AGENT 1\n"
 MAX_PAYLOAD = 64 * 1024 * 1024
 BLOB_RE = re.compile(r"^[0-9a-f]{64}$")
 SNAP_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,99}$")

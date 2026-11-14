@@ -1,6 +1,6 @@
 ---
 name: Idea
-about: Something Safekeep should do or do differently
+about: Something Tuckvault should do or do differently
 labels: enhancement
 ---
 

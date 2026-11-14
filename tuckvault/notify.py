@@ -17,19 +17,19 @@ $ErrorActionPreference = 'Stop'
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
 [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
 $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
-$xml.LoadXml($env:SAFEKEEP_TOAST_XML)
+$xml.LoadXml($env:TUCKVAULT_TOAST_XML)
 $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($env:SAFEKEEP_TOAST_APP).Show($toast)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($env:TUCKVAULT_TOAST_APP).Show($toast)
 """
 
 
 def _toast(title: str, body: str) -> bool:
     xml = ('<toast scenario="reminder"><visual><binding template="ToastGeneric">'
            f"<text>{escape(title)}</text><text>{escape(body)}</text>"
-           '<text placement="attribution">Safekeep</text></binding></visual>'
+           '<text placement="attribution">Tuckvault</text></binding></visual>'
            '<actions><action content="Dismiss" arguments="dismiss" activationType="system"/></actions>'
            "</toast>")
-    env = dict(os.environ, SAFEKEEP_TOAST_XML=xml, SAFEKEEP_TOAST_APP=_APP_ID)
+    env = dict(os.environ, TUCKVAULT_TOAST_XML=xml, TUCKVAULT_TOAST_APP=_APP_ID)
     encoded = base64.b64encode(_SCRIPT.encode("utf-16-le")).decode("ascii")
     try:
         res = subprocess.run(
@@ -62,7 +62,7 @@ def notify_result(result: dict) -> None:
     """Notify only when a run needs the user's attention."""
     status = result.get("status")
     if status == "failed":
-        notify("Backup failed", result.get("error") or "Open Safekeep to see what went wrong.")
+        notify("Backup failed", result.get("error") or "Open Tuckvault to see what went wrong.")
     elif status == "warning":
         warnings = result.get("warnings") or []
         first = warnings[0] if warnings else ""

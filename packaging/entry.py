@@ -1,8 +1,8 @@
-"""Entry point of the packaged Windows build (see safekeep.spec)."""
+"""Entry point of the packaged Windows build (see tuckvault.spec)."""
 
 import sys
 
-from safekeep.__main__ import main
+from tuckvault.__main__ import main
 
 if __name__ == "__main__":
     sys.exit(main())

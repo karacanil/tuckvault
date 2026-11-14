@@ -17,14 +17,14 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from safekeep import config, engine, gui  # noqa: E402
+from tuckvault import config, engine, gui  # noqa: E402
 
 
 class GuiFlow(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="safekeep-gui-"))
-        os.environ["SAFEKEEP_HOME"] = str(self.tmp / "home")
-        os.environ["SAFEKEEP_TASK_NAME"] = r"Safekeep\GuiTest"
+        self.tmp = Path(tempfile.mkdtemp(prefix="tuckvault-gui-"))
+        os.environ["TUCKVAULT_HOME"] = str(self.tmp / "home")
+        os.environ["TUCKVAULT_TASK_NAME"] = r"Tuckvault\GuiTest"
         self.src = self.tmp / "documents"
         self.src.mkdir()
         (self.src / "vault.json").write_bytes(b'{"secret": 1}' * 100)
@@ -54,7 +54,7 @@ class GuiFlow(unittest.TestCase):
             self.app.destroy()
         except Exception:
             pass
-        for var in ("SAFEKEEP_HOME", "SAFEKEEP_TASK_NAME"):
+        for var in ("TUCKVAULT_HOME", "TUCKVAULT_TASK_NAME"):
             os.environ.pop(var, None)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
@@ -259,7 +259,7 @@ class GuiFlow(unittest.TestCase):
         dialog, tree, query, restore = app._file_dialog
         app.update()
         self.assertEqual(len(tree.get_children()), 2)
-        query.set("VAULT")  # the filter ignores upper and lower case
+        query.set("VAULT.JS")  # the filter ignores upper and lower case
         rows = tree.get_children()
         self.assertEqual([os.path.basename(tree.set(r, "file")) for r in rows], ["vault.json"])
         self.dialogs.clear()

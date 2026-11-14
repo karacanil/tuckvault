@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.0
+
+**Renamed to Tuckvault.** Until 1.2 this program was called Safekeep; the
+old name was already used by another backup tool. Nothing else changes.
+
+- Your settings, key and history are taken over the first time Tuckvault
+  starts (`%APPDATA%\Safekeep` becomes `%APPDATA%\Tuckvault`), and
+  existing backups stay readable.
+- Automatic backups registered by an older version are re-registered under
+  the new name when you open the window.
+- The programs are now `Tuckvault.exe` and `tuckvault-cli.exe`. If you
+  installed Safekeep with its installer, uninstall it and install
+  Tuckvault; your settings and backups are kept.
+- The entries below keep the old name, as they were written.
+
 ## 1.2.0
 
 **New**

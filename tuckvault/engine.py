@@ -17,7 +17,7 @@ from .remote import SNAP_NAME, ConnectError, Remote, RemoteError, folder_of
 CHUNK = 4 * 1024 * 1024
 VERIFY_BATCH = 200
 
-log = logging.getLogger("safekeep")
+log = logging.getLogger("tuckvault")
 
 
 class BackupError(Exception):
@@ -67,7 +67,7 @@ def _excluded(path: str, name: str, patterns) -> bool:
 
 
 class _Lock:
-    """One Safekeep operation at a time on this PC. Released if we crash."""
+    """One Tuckvault operation at a time on this PC. Released if we crash."""
 
     def __init__(self, wait: float = 0):
         self.wait = wait  # seconds to wait for a running operation to finish
@@ -88,7 +88,7 @@ class _Lock:
             except OSError:
                 if time.monotonic() >= deadline:
                     self.fh.close()
-                    raise AlreadyRunning("Another Safekeep backup or restore is already running.")
+                    raise AlreadyRunning("Another Tuckvault backup or restore is already running.")
                 time.sleep(min(5, max(0.1, self.wait / 20)))
 
     def __exit__(self, *exc):
@@ -122,7 +122,7 @@ class Repo:
                     "The backup destination no longer holds the backups that were there before"
                     + (" (it is empty)." if meta is None else " (it holds a different set).")
                     + " Check that the right disk or folder is connected. To start a new set "
-                      "of backups there on purpose, use Back up now in the Safekeep window.")
+                      "of backups there on purpose, use Back up now in the Tuckvault window.")
             if meta is None:
                 if not create:
                     raise BackupError("There are no backups at the destination yet.")
@@ -186,7 +186,7 @@ class Repo:
     def vanished(self) -> list:
         """Backups this PC has seen at the destination that are no longer there.
 
-        Safekeep forgets a backup locally when it removes it itself, so
+        Tuckvault forgets a backup locally when it removes it itself, so
         anything listed here was removed by someone or something else.
         Each one is reported once.
         """
@@ -343,7 +343,7 @@ def run_backup(cfg: dict = None, progress=None, attempts: int = 1,
 
     only: id of one group from config.groups() to back up just those items;
     None backs up everything. wait: seconds to wait for another running
-    Safekeep operation instead of skipping.
+    Tuckvault operation instead of skipping.
     """
     setup_logging()
     cfg = cfg or config.load()
@@ -413,7 +413,7 @@ def _backup(cfg, sources, result, progress, attempts):
         gone = repo.vanished()
         if gone:
             warnings.append(f"{len(gone)} earlier backups had disappeared from the backup "
-                            "destination without Safekeep removing them. Use Check all backups "
+                            "destination without Tuckvault removing them. Use Check all backups "
                             "now on the Restore tab to see whether they are complete.")
         blobs = remote.list_blobs()
         free = remote.call("stat")[0]["free"]
@@ -579,7 +579,7 @@ def _scrub(repo: Repo, progress=None):
                      "put back from the copy on this PC.")
     if gone:
         parts.append(f"{len(gone)} earlier backups had disappeared from the backup destination "
-                     "without Safekeep removing them; they were put back where this PC still "
+                     "without Tuckvault removing them; they were put back where this PC still "
                      "had what was needed.")
     return " ".join(parts) or None
 
@@ -729,7 +729,7 @@ def run_restore(snapshot: str, dest: str, cfg: dict = None, progress=None, only=
                 for f in files:
                     target = _restore_target(dest, f["p"])
                     _progress(progress, "restore", done, total, f["p"])
-                    part = target + ".safekeep-part"
+                    part = target + ".tuckvault-part"
                     try:
                         os.makedirs(_lp(os.path.dirname(target)), exist_ok=True)
                         with open(_lp(part), "wb") as out:

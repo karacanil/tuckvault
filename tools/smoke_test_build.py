@@ -1,11 +1,11 @@
-"""Checks a packaged build (dist\\Safekeep) really works, with throwaway settings and data.
+"""Checks a packaged build (dist\\Tuckvault) really works, with throwaway settings and data.
 
-    python tools\\smoke_test_build.py dist\\Safekeep [ssh-name]
+    python tools\\smoke_test_build.py dist\\Tuckvault [ssh-name]
 
 Runs the two programs the way a user and the scheduled tasks would:
 back up to a folder, check, restore, compare, and open the window.
 With an SSH name it repeats the backup against that computer.
-Nothing of the real Safekeep settings is touched.
+Nothing of the real Tuckvault settings is touched.
 """
 
 import ctypes
@@ -42,10 +42,10 @@ def _window_of(pid: int, title: str) -> int:
 def main() -> int:
     dist = Path(sys.argv[1]).resolve()
     ssh_host = sys.argv[2] if len(sys.argv) > 2 else None
-    cli, gui = dist / "safekeep-cli.exe", dist / "Safekeep.exe"
-    tmp = Path(tempfile.mkdtemp(prefix="safekeep-smoke-"))
+    cli, gui = dist / "tuckvault-cli.exe", dist / "Tuckvault.exe"
+    tmp = Path(tempfile.mkdtemp(prefix="tuckvault-smoke-"))
     home = tmp / "home"
-    env = dict(os.environ, SAFEKEEP_HOME=str(home), SAFEKEEP_TASK_NAME=r"Safekeep\SmokeTest")
+    env = dict(os.environ, TUCKVAULT_HOME=str(home), TUCKVAULT_TASK_NAME=r"Tuckvault\SmokeTest")
     failures = []
 
     def check(name, ok, detail=""):
@@ -91,7 +91,7 @@ def main() -> int:
         check("schedule status", r.returncode == 0, r.stdout + r.stderr)
 
         if ssh_host:
-            repo = f"safekeep-smoke-{os.getpid()}"
+            repo = f"tuckvault-smoke-{os.getpid()}"
             write_config({"type": "ssh", "host": ssh_host, "path": repo})
             (home / "cache.json").unlink(missing_ok=True)
             try:
@@ -109,7 +109,7 @@ def main() -> int:
         user32, hwnd = ctypes.windll.user32, 0
         for _ in range(100):
             time.sleep(0.2)
-            hwnd = _window_of(proc.pid, "Safekeep")
+            hwnd = _window_of(proc.pid, "Tuckvault")
             if hwnd or proc.poll() is not None:
                 break
         check("window opens", bool(hwnd) and proc.poll() is None)

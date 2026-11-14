@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for looking. Safekeep is a small tool and should stay one: a window,
+Thanks for looking. Tuckvault is a small tool and should stay one: a window,
 a scheduler entry, an encrypted store. Changes that keep it small and make
 it safer or clearer are the most welcome.
 
@@ -13,17 +13,17 @@ python -m venv .venv
 ```
 
 The tests run the real engine, storage program and window against a
-temporary folder. They never touch your own Safekeep settings, Task
+temporary folder. They never touch your own Tuckvault settings, Task
 Scheduler entries or the network.
 
 ## Before opening a pull request
 
 - Add or update a test that fails without your change.
-- `python -m unittest discover -s tests` and `python -m bandit -q -r safekeep -ll` pass.
-- `safekeep/agent.py` stays standard-library only and must run on the
+- `python -m unittest discover -s tests` and `python -m bandit -q -r tuckvault -ll` pass.
+- `tuckvault/agent.py` stays standard-library only and must run on the
   Python 3 of an ordinary Linux machine; it is sent there as source.
 - Anything that comes back from the backup destination is untrusted input.
-  Validate it in `safekeep/remote.py` before it is used.
+  Validate it in `tuckvault/remote.py` before it is used.
 - No new runtime dependency without a good reason; each one ships to every
   user and has to be audited.
 - User-facing text is plain language: say what happened and what to do.

@@ -1,4 +1,4 @@
-"""The Safekeep window (tkinter, no extra dependencies)."""
+"""The Tuckvault window (tkinter, no extra dependencies)."""
 
 import os
 import queue
@@ -126,7 +126,7 @@ def _int(var, low, high, default):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Safekeep")
+        self.title("Tuckvault")
         self.geometry("800x640")
         self.minsize(720, 600)
         try:
@@ -345,7 +345,7 @@ class App(tk.Tk):
         ttk.Checkbutton(tab, text="Tell me when a new version is available (asks github.com when "
                                   "this window opens)",
                         variable=self.v_updates, command=self._updates_changed).pack(anchor="w", pady=(4, 0))
-        ttk.Label(tab, text=f"Safekeep {__version__}", foreground="#777").pack(anchor="e", side="bottom")
+        ttk.Label(tab, text=f"Tuckvault {__version__}", foreground="#777").pack(anchor="e", side="bottom")
 
     def _build_status_bar(self):
         bar = ttk.Frame(self, padding=(PAD, 6))
@@ -369,7 +369,7 @@ class App(tk.Tk):
         self.v_dest.set(DEST_LABELS["local" if local else "ssh"])
         self.v_host.set(dest.get("host", ""))
         self.v_folder.set(dest.get("folder") or (dest.get("path", "") if local else ""))
-        self.v_path.set("safekeep-repo" if local and not dest.get("folder") else dest.get("path", ""))
+        self.v_path.set("tuckvault-repo" if local and not dest.get("folder") else dest.get("path", ""))
         self._sync_destination_widgets()
         self.v_keep.set(str(cfg.get("keep_last", 30)))
         self.v_key_saved.set(bool(cfg.get("recovery_key_saved")))
@@ -411,7 +411,7 @@ class App(tk.Tk):
         cfg["sources"] = self._source_paths()
         cfg["destination"].update(type=key_from(self.v_dest.get(), DEST_LABELS),
                                   host=self.v_host.get().strip(),
-                                  path=self.v_path.get().strip() or "safekeep-repo",
+                                  path=self.v_path.get().strip() or "tuckvault-repo",
                                   folder=self.v_folder.get().strip())
         cfg["keep_last"] = _int(self.v_keep, 1, 999, 30)
         cfg["schedule"].update(self.schedule.get(), enabled=bool(self.v_enabled.get()))
@@ -421,16 +421,16 @@ class App(tk.Tk):
         cfg = self._collect()
         dest = cfg["destination"]
         if dest["type"] == "local" and not dest["folder"]:
-            messagebox.showwarning("Safekeep", "Choose the folder that will hold the backups.")
+            messagebox.showwarning("Tuckvault", "Choose the folder that will hold the backups.")
             return False
         if dest["type"] != "local" and not dest["host"]:
-            messagebox.showwarning("Safekeep", "Enter the SSH name of the backup computer.")
+            messagebox.showwarning("Tuckvault", "Enter the SSH name of the backup computer.")
             return False
         config.save(cfg)
         try:
             scheduler.apply(cfg)
         except OSError as e:
-            messagebox.showerror("Safekeep", f"Settings were saved, but the automatic schedule "
+            messagebox.showerror("Tuckvault", f"Settings were saved, but the automatic schedule "
                                              f"could not be set.\n\n{e}")
             return False
         self._load_into_widgets()
@@ -483,7 +483,7 @@ class App(tk.Tk):
     def _edit_item_schedule(self):
         chosen = [self.sources.set(i, "item") for i in self.sources.selection()]
         if not chosen:
-            messagebox.showinfo("Safekeep", "Select one or more items in the list first.")
+            messagebox.showinfo("Tuckvault", "Select one or more items in the list first.")
             return
         current = config.own_schedule(self.cfg, chosen[0])
         dialog = tk.Toplevel(self)
@@ -583,7 +583,7 @@ class App(tk.Tk):
     def _open_log(self):
         path = paths.log_file()
         if not path.exists():
-            messagebox.showinfo("Safekeep", "There is no log yet.")
+            messagebox.showinfo("Tuckvault", "There is no log yet.")
         elif hasattr(os, "startfile"):
             os.startfile(path)
 
@@ -617,7 +617,7 @@ class App(tk.Tk):
                     latest = data
                 elif kind == "update":
                     self.update_note.configure(
-                        text=f"Safekeep {data} is available. Click here to open the download page.")
+                        text=f"Tuckvault {data} is available. Click here to open the download page.")
                     self.update_note.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
                 else:
                     self._finish(*data)
@@ -646,7 +646,7 @@ class App(tk.Tk):
         self._sync_key_banner()
         if error is not None:
             self.status.configure(text="Failed")
-            messagebox.showerror("Safekeep", str(error))
+            messagebox.showerror("Tuckvault", str(error))
         else:
             on_done(value)
 
@@ -656,19 +656,19 @@ class App(tk.Tk):
             self.status.configure(text=ok_text)
         elif status == "skipped":
             self.status.configure(text=result.get("error", "Skipped"))
-            messagebox.showinfo("Safekeep", result.get("error", "Skipped"))
+            messagebox.showinfo("Tuckvault", result.get("error", "Skipped"))
         else:
             self.status.configure(text=STATUS_LABELS.get(status, "Failed"))
             lines = [result.get("error") or "Some files had problems:"] + result.get("warnings", [])[:8]
             box = messagebox.showwarning if status == "warning" else messagebox.showerror
-            box("Safekeep", "\n\n".join(l for l in lines if l))
+            box("Tuckvault", "\n\n".join(l for l in lines if l))
 
     # -- actions ---------------------------------------------------------
     def _backup_now(self):
         if not self._save(quiet=True):
             return
         if not self.cfg["sources"]:
-            messagebox.showinfo("Safekeep", "Add at least one file or folder to back up first.")
+            messagebox.showinfo("Tuckvault", "Add at least one file or folder to back up first.")
             return
         cfg = self.cfg
 
@@ -676,8 +676,8 @@ class App(tk.Tk):
             if result.get("code") == "repo_changed":
                 self.status.configure(text="Failed")
                 if messagebox.askyesno(
-                        "Safekeep", result["error"].split(" To start a new set")[0]
-                        + "\n\nIf that is expected (a new or emptied disk), Safekeep can start a "
+                        "Tuckvault", result["error"].split(" To start a new set")[0]
+                        + "\n\nIf that is expected (a new or emptied disk), Tuckvault can start a "
                           "new set of backups there. Backups that were there before are not "
                           "brought back by this.\n\nStart a new set of backups at this destination?",
                         icon="warning", default="no"):
@@ -717,7 +717,7 @@ class App(tk.Tk):
     def _selected_snapshot(self):
         sel = self.snapshots.selection()
         if not sel:
-            messagebox.showinfo("Safekeep", "Click Refresh list, then select the backup to restore.")
+            messagebox.showinfo("Tuckvault", "Click Refresh list, then select the backup to restore.")
             return None
         return sel[0]
 
@@ -733,7 +733,7 @@ class App(tk.Tk):
             return False
         dest = os.path.normpath(dest)
         if os.listdir(dest) and not messagebox.askyesno(
-                "Safekeep", f"{dest} is not empty. Files with the same name inside it will be "
+                "Tuckvault", f"{dest} is not empty. Files with the same name inside it will be "
                             "replaced by the restored copies.\n\nRestore here anyway?"):
             return False
         cfg = self._collect()
@@ -798,7 +798,7 @@ class App(tk.Tk):
         def restore():
             chosen = [fill.shown[int(i)]["p"] for i in tree.selection()]
             if not chosen:
-                messagebox.showinfo("Safekeep", "Select the files to restore first.", parent=dialog)
+                messagebox.showinfo("Tuckvault", "Select the files to restore first.", parent=dialog)
                 return
             if self._restore_into_chosen_folder(name, only=chosen, parent=dialog):
                 dialog.destroy()
@@ -822,7 +822,7 @@ class App(tk.Tk):
     def _key_text(self):
         key = keystore.recovery_key()
         if key is None:
-            messagebox.showinfo("Safekeep", "There is no key yet. It is created by the first backup.")
+            messagebox.showinfo("Tuckvault", "There is no key yet. It is created by the first backup.")
         return key
 
     def _show_key(self):
@@ -843,10 +843,10 @@ class App(tk.Tk):
             return
         path = filedialog.asksaveasfilename(parent=self, title="Save recovery key",
                                             defaultextension=".txt",
-                                            initialfile="safekeep-recovery-key.txt")
+                                            initialfile="tuckvault-recovery-key.txt")
         if path:
             with open(path, "w", encoding="utf-8") as f:
-                f.write("Safekeep recovery key\n\n" + key + "\n\nAnyone with this key and access "
+                f.write("Tuckvault recovery key\n\n" + key + "\n\nAnyone with this key and access "
                         "to the backup machine can read your backups. Keep it private.\n")
             self.status.configure(text=f"Recovery key saved to {path}")
 
@@ -870,7 +870,7 @@ class App(tk.Tk):
             try:
                 keystore.import_recovery_key(value.get())
             except (ValueError, OSError) as e:
-                messagebox.showerror("Safekeep", str(e), parent=dialog)
+                messagebox.showerror("Tuckvault", str(e), parent=dialog)
                 return
             dialog.destroy()
             self.v_key.set("")
@@ -906,7 +906,7 @@ def main():
     try:
         import ctypes
         # Own taskbar identity, so Windows shows our icon and not Python's.
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Safekeep.Backup")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Tuckvault.Backup")
         ctypes.windll.shcore.SetProcessDpiAwareness(1)  # crisp text on high-DPI screens
     except Exception:
         pass

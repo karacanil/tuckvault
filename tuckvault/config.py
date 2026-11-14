@@ -16,7 +16,7 @@ FREQUENCIES = ["hourly", "daily", "weekly", "monthly"]
 DEFAULTS = {
     "sources": [],
     "excludes": ["Thumbs.db", "desktop.ini", "~$*", "*.tmp"],
-    "destination": {"type": "ssh", "host": "", "path": "safekeep-repo", "folder": ""},
+    "destination": {"type": "ssh", "host": "", "path": "tuckvault-repo", "folder": ""},
     "schedule": {
         "enabled": True,
         "frequency": "weekly",
@@ -162,7 +162,7 @@ def destination_key(destination: dict) -> str:
         folder = destination.get("folder") or destination.get("path") or ""
         return "folder|" + _norm(folder)
     return "ssh|%s|%s" % ((destination.get("host") or "").strip().lower(),
-                          (destination.get("path") or "safekeep-repo").strip())
+                          (destination.get("path") or "tuckvault-repo").strip())
 
 
 def known_repo(destination: dict):
