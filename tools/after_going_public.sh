@@ -20,5 +20,5 @@ JSON
 
 echo "Protect main: tests must pass, no force pushes, no deletion"
 gh api -X PUT "$R/branches/main/protection" --input - >/dev/null <<'JSON' && echo "  on"
-{"required_status_checks":{"strict":false,"contexts":["test"]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null,"allow_force_pushes":false,"allow_deletions":false}
+{"required_status_checks":{"strict":false,"contexts":["test","test-linux"]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null,"allow_force_pushes":false,"allow_deletions":false}
 JSON
