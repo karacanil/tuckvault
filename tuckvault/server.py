@@ -195,11 +195,14 @@ class _Vault:
 
     def _connect(self, create: bool):
         if self.remote is None:
-            if create and self.dest.get("type") == "local":
+            if self.dest.get("type") == "local":
                 # The folder all phone vaults share. Only made where its own parent
                 # exists, so an unplugged disk is never quietly replaced by a new folder.
                 root = os.path.dirname(folder_of(self.dest))
                 if not os.path.isdir(root) and os.path.isdir(os.path.dirname(root)):
+                    if not create:  # no phone has stored anything yet
+                        self.opened, self.meta = False, None
+                        return
                     os.mkdir(root)
             remote = Remote(self.dest)
             remote.connect()
@@ -317,20 +320,27 @@ class Handler(BaseHTTPRequestHandler):
             raise _Reply(400, "cut_short", "The upload was cut short.")
         return data
 
-    def _device(self, body: bytes) -> dict:
+    def _known_device(self) -> dict:
+        """The paired phone the headers name. Checked before any body is read, so a stranger
+        cannot make this service take in large uploads."""
         device = self.headers.get("X-Tuckvault-Device") or ""
         sign = self.headers.get("X-Tuckvault-Sign") or ""
         when = self.headers.get("X-Tuckvault-Time") or ""
         known = load()["devices"].get(device) if _DEVICE.fullmatch(device) else None
         if known is None or not _HEX64.fullmatch(sign) or not when.isdigit():
+            self.close_connection = True  # whatever body was sent stays unread
             raise _Reply(401, "not_paired", "This phone is not paired with this computer (any more).")
         if abs(time.time() - int(when)) > MAX_SKEW:
+            self.close_connection = True
             raise _Reply(401, "clock", "The clock on the phone or on the computer is wrong; "
                                        "they differ by more than a few minutes.")
-        want = signature(known["secret"], self.command, self.path, when, hashlib.sha256(body).hexdigest())
-        if not hmac.compare_digest(want, sign):
-            raise _Reply(401, "not_paired", "This phone is not paired with this computer (any more).")
         return dict(known, id=device)
+
+    def _check_signature(self, device: dict, body: bytes) -> None:
+        want = signature(device["secret"], self.command, self.path, self.headers.get("X-Tuckvault-Time"),
+                         hashlib.sha256(body).hexdigest())
+        if not hmac.compare_digest(want, self.headers.get("X-Tuckvault-Sign") or ""):
+            raise _Reply(401, "not_paired", "This phone is not paired with this computer (any more).")
 
     def _handle(self):
         try:
@@ -366,9 +376,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(dict(pair(code, name, platform), name=socket.gethostname()))
 
         m = _ROUTE.fullmatch(url.path)
+        device = self._known_device()
         blob_upload = bool(m and m.group(2) == "blobs" and method == "PUT")
         body = self._body(MAX_BLOB if blob_upload else MAX_JSON) if method in ("POST", "PUT") else b""
-        device = self._device(body)
+        self._check_signature(device, body)
         if url.path == "/v1/whoami" and method == "GET":
             return self._json({"ok": True, "name": socket.gethostname(), "version": __version__})
         if not m:
@@ -437,6 +448,10 @@ class Handler(BaseHTTPRequestHandler):
         if what == "verify" and method == "POST" and name is None:
             wanted, full = names(), bool(data().get("full"))
             return self._json(vault.run(lambda r: r.verify_blobs(wanted, full=full)))
+        if what == "quarantine" and method == "POST" and name is None:
+            wanted = names()  # damaged pieces are moved aside, not destroyed
+            vault.run(lambda r: r.quarantine_blobs(wanted))
+            return self._json({})
         if what == "delete-blobs" and method == "POST" and name is None:
             wanted = names()
             return self._json({"deleted": vault.run(lambda r: r.delete_blobs(wanted))})

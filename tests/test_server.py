@@ -258,6 +258,11 @@ class Vault(Base):
         blob_file.write_bytes(b"rotten")
         status, reply = self.phone.json("POST", base + "/verify", {"names": [name], "full": True})
         self.assertEqual(reply["corrupt"], [name])
+        # damaged pieces are moved aside (not destroyed), so the next backup sends them again
+        self.assertEqual(self.phone.json("POST", base + "/quarantine", {"names": [name]})[0], 200)
+        self.assertFalse(blob_file.exists())
+        self.assertEqual(len(list((blob_file.parent.parent.parent / "quarantine").iterdir())), 1)
+        self.assertEqual(self.phone.call("PUT", base + "/blobs/" + name, blob)[0], 200)
         status, reply = self.phone.json("POST", base + "/delete-blobs", {"names": [name]})
         self.assertEqual(reply["deleted"], 1)
         self.assertFalse(blob_file.exists())
@@ -294,10 +299,23 @@ class Vault(Base):
         self.assertEqual((status, reply["error"]), (404, "no_vault"))
         self.assertFalse((self.tmp / "repo-phones" / ("c" * 24)).exists())
 
+    def test_strangers_cannot_make_the_service_take_in_uploads(self):
+        # no pairing: answered from the headers alone, the megabytes are never read
+        import socket
+        with socket.create_connection(("127.0.0.1", self.service.port), timeout=10) as sock:
+            sock.sendall(("PUT /v1/vaults/%s/blobs/%s HTTP/1.1\r\nHost: x\r\nContent-Length: 60000000\r\n"
+                          "X-Tuckvault-Device: %s\r\nX-Tuckvault-Time: 1\r\nX-Tuckvault-Sign: %s\r\n\r\n"
+                          % ("a" * 24, "b" * 64, "0" * 12, "0" * 64)).encode())
+            self.assertIn(b" 401 ", sock.recv(4096).split(b"\r\n")[0])
+
     def test_too_large_upload_is_refused_without_reading_it(self):
         keys, base, _ = self.new_vault()
-        status, _ = self.phone.raw("PUT", base + "/blobs/" + "a" * 64, b"",
-                                   {"Content-Length": str(server.MAX_BLOB + 1)})
+        when = str(int(time.time()))
+        path = base + "/blobs/" + "a" * 64
+        status, _ = self.phone.raw("PUT", path, b"", {
+            "Content-Length": str(server.MAX_BLOB + 1), "X-Tuckvault-Device": self.phone.device,
+            "X-Tuckvault-Time": when, "X-Tuckvault-Sign": server.signature(
+                self.phone.secret, "PUT", path, when, hashlib.sha256(b"").hexdigest())})
         self.assertEqual(status, 413)
 
     def test_two_phones_share_a_vault_with_the_same_key(self):
