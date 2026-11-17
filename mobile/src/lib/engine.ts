@@ -46,7 +46,8 @@ export type Manifest = {
 };
 
 export type Phase = 'connect' | 'backup' | 'verify' | 'scrub' | 'prune' | 'restore';
-export type Progress = { phase: Phase; done: number; total: number; text: string };
+/** done/total are bytes while backing up or restoring (total 0 = not known), pieces while checking. */
+export type Progress = { phase: Phase; done: number; total: number; text: string; file?: number; files?: number };
 
 export type Result = {
   kind: 'backup' | 'verify' | 'restore';
@@ -102,10 +103,11 @@ function snapshotName(ms: number, suffix: string): string {
   return d.slice(0, 19).replace(/[-:]/g, '') + '.' + d.slice(20, 23) + '000Z-' + suffix + '.snap';
 }
 
-function report(cb: ((p: Progress) => void) | undefined, phase: Phase, done: number, total: number, text: string) {
+function report(cb: ((p: Progress) => void) | undefined, phase: Phase, done: number, total: number, text: string,
+                file?: number, files?: number) {
   if (cb) {
     try {
-      cb({ phase, done, total, text });
+      cb({ phase, done, total, text, file, files });
     } catch {
       // a broken progress display must never break a backup
     }
@@ -276,7 +278,7 @@ async function backup(o: BackupOptions, result: Result, keep: (c: Cache) => void
         result.remaining = o.items.length - index;
         break;
       }
-      report(o.progress, 'backup', done, total, item.path);
+      report(o.progress, 'backup', done, total, item.path, index, o.items.length);
       const hit = cache.files[item.key];
       let chunks: string[];
       let size: number;
@@ -303,7 +305,7 @@ async function backup(o: BackupOptions, result: Result, keep: (c: Cache) => void
             }
             chunks.push(sealed.name);
             size += sealed.read;
-            report(o.progress, 'backup', done + size, Math.max(total, done + size), item.path);
+            report(o.progress, 'backup', done + size, Math.max(total, done + size), item.path, index, o.items.length);
             if (sealed.read < CHUNK) break;
             if (o.cancelled && o.cancelled()) throw new BackupError('cancelled', 'Stopped.');
           }

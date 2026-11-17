@@ -1,6 +1,8 @@
 package expo.modules.tuckvaultcore
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
@@ -45,6 +47,17 @@ class TuckvaultCoreModule : Module() {
         Vault.hex(Vault.decodeRecoveryKey(text))
       } catch (e: IllegalArgumentException) {
         throw TuckvaultException("ERR_RECOVERY_KEY", e.message ?: "That is not a valid recovery key.")
+      }
+    }
+
+    // True while the phone has a Wi-Fi (or cable) connection, also when a VPN such as Tailscale
+    // is the active network on top of it.
+    Function("onWifi") {
+      val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+      manager.allNetworks.any { network ->
+        val caps = manager.getNetworkCapabilities(network)
+        caps != null && (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+          caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
       }
     }
 

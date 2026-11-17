@@ -18,6 +18,8 @@ export declare class TuckvaultCoreNative extends NativeModule {
   encodeRecoveryKey(master: string): string;
   /** Throws with a message fit to show the user. */
   decodeRecoveryKey(text: string): string;
+  /** True while connected to Wi-Fi, also underneath a VPN such as Tailscale. */
+  onWifi(): boolean;
 
   statFile(uri: string): Promise<FileStat>;
   /** Every file below a folder, paths relative to it with "/". */

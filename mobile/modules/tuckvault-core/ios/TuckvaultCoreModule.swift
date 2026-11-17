@@ -37,6 +37,24 @@ public class TuckvaultCoreModule: Module {
       }
     }
 
+    // True while the phone has a Wi-Fi address, also when a VPN such as Tailscale is active on top of it.
+    Function("onWifi") { () -> Bool in
+      var list: UnsafeMutablePointer<ifaddrs>?
+      guard getifaddrs(&list) == 0 else { return false }
+      defer { freeifaddrs(list) }
+      var cursor = list
+      while let entry = cursor {
+        let flags = Int32(entry.pointee.ifa_flags)
+        if let address = entry.pointee.ifa_addr, Int32(address.pointee.sa_family) == AF_INET,
+           String(cString: entry.pointee.ifa_name) == "en0",
+           flags & IFF_UP != 0, flags & IFF_RUNNING != 0 {
+          return true
+        }
+        cursor = entry.pointee.ifa_next
+      }
+      return false
+    }
+
     // MARK: files
 
     AsyncFunction("statFile") { (uri: String) -> [String: Any?] in
