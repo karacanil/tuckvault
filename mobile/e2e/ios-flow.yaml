@@ -28,10 +28,16 @@ appId: io.github.karacanil.tuckvault
 
 # the recovery key: copied, so the test can hand it to the PC program afterwards
 - extendedWaitUntil:
-    visible:
-      id: "key-saved"
+    visible: "Save your recovery key"
     timeout: 30000
+- takeScreenshot: ios-02a-recovery-key
 - tapOn: "Copy"
+# on a small screen the tick box is below the fold
+- scrollUntilVisible:
+    element:
+      id: "key-saved"
+    direction: DOWN
+    timeout: 20000
 - tapOn:
     id: "key-saved"
 - takeScreenshot: ios-02-recovery-key-step
