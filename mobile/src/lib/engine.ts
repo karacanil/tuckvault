@@ -10,6 +10,8 @@ import type { Platform } from './platform.ts';
 export const CHUNK = 4 * 1024 * 1024;
 const VERIFY_BATCH = 200;
 const SAVE_EVERY_MS = 20_000;
+/** Pause before an upload is tried again grows from this (tests shorten it). */
+export const tuning = { retryMs: 1000 };
 
 /** One file to back up. */
 export type Item = {
@@ -176,7 +178,7 @@ async function putBlob(s: Session, name: string, path: string): Promise<void> {
     } catch (e) {
       const code = e instanceof BackupError ? e.code : '';
       if (attempt >= 3 || !['unreachable', 'damaged', 'cut_short', 'storage_unreachable', 'busy'].includes(code)) throw e;
-      await sleep(1000 * (attempt + 1) * (attempt + 1));
+      await sleep(tuning.retryMs * (attempt + 1) * (attempt + 1));
     }
   }
 }

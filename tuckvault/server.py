@@ -41,7 +41,8 @@ MAX_JSON = 4 * 1024 * 1024
 MAX_SKEW = 15 * 60               # seconds a phone's clock may differ from ours
 PAIR_MINUTES = 10
 PAIR_TRIES = 5
-IDLE_CLOSE = 20                  # seconds before an unused vault connection is released
+# seconds before an unused vault connection is released (the environment variable is for tests)
+IDLE_CLOSE = float(os.environ.get("TUCKVAULT_SERVE_IDLE") or 20)
 _ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no I, L, O, 0, 1
 _VAULT = re.compile(r"[0-9a-f]{24}")
 _DEVICE = re.compile(r"[0-9a-f]{12}")
@@ -612,7 +613,7 @@ class Service:
 
     def _housekeeping(self):
         ticks = 0
-        while not self._stop.wait(5):
+        while not self._stop.wait(min(5, max(0.2, IDLE_CLOSE / 2))):
             ticks += 1
             self.vaults.release_idle()
             if ticks % 6 == 0:

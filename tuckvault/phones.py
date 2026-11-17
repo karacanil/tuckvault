@@ -3,6 +3,7 @@
 import getpass
 import os
 import sys
+import time
 
 from . import crypto, engine, scheduler, server
 
@@ -35,7 +36,16 @@ def restore(cfg: dict, dest: str, recovery_key: str, snapshot: str = "latest") -
     vault = crypto.Keys(master).check[:24]
     phone_cfg = dict(cfg, destination=server.vault_destination(server.phones_root(cfg), vault), _key=master)
     if snapshot == "latest":
-        snaps = [s for s in engine.list_snapshots(phone_cfg) if "error" not in s]
+        # Right after a backup the phone service still holds these backups for a few seconds.
+        for attempt in range(15):
+            try:
+                found = engine.list_snapshots(phone_cfg)
+                break
+            except engine.BackupError as e:
+                if "in use by another backup" not in str(e) or attempt == 14:
+                    raise
+                time.sleep(3)
+        snaps = [s for s in found if "error" not in s]
         if not snaps:
             raise engine.BackupError("There are no readable backups from that phone.")
         snapshot = snaps[0]["name"]
