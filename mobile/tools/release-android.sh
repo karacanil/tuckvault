@@ -25,13 +25,15 @@ npx expo prebuild --platform android --no-install
 (cd android && ./gradlew :tuckvault-core:testDebugUnitTest :app:assembleRelease \
   -PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64 --console=plain)
 
+# (No --key-pass: the key uses the keystore's password, and apksigner would otherwise look for a
+# second line in the password file.)
 TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
 SIGNER="$TOOLS/apksigner"
 [ -f "$SIGNER.bat" ] && SIGNER="$SIGNER.bat"
 mkdir -p dist
 OUT="dist/Tuckvault-$VERSION-android.apk"
 "$SIGNER" sign --ks "$TUCKVAULT_KEYSTORE" --ks-key-alias "$ALIAS" \
-  --ks-pass "file:$TUCKVAULT_KEYSTORE_PASSWORD_FILE" --key-pass "file:$TUCKVAULT_KEYSTORE_PASSWORD_FILE" \
+  --ks-pass "file:$TUCKVAULT_KEYSTORE_PASSWORD_FILE" \
   --out "$OUT" android/app/build/outputs/apk/release/app-release.apk
 "$SIGNER" verify --print-certs "$OUT" | grep -E "SHA-256|Signer #1 certificate DN"
 rm -f "$OUT.idsig"

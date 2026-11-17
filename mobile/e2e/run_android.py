@@ -176,7 +176,9 @@ def main():
         # -- setup ---------------------------------------------------------
         log("setup: welcome")
         d.launch()
-        d.wait_for("get-started", timeout=60)
+        if d.dismiss_not_responding():  # the launcher of a freshly started emulator can hang for a moment
+            d.launch()
+        d.wait_for("get-started", timeout=120)
         shot("01-welcome")
         d.tap("get-started")
 

@@ -71,10 +71,24 @@ class Device:
             node = self.find(test_id, text, contains)
             if node is not None:
                 return node
+            if self.dismiss_not_responding():
+                deadline += 20  # a slow emulator, not the app: give it the time back
+                continue
             if time.time() > deadline:
                 raise AssertionError("did not appear: %s. On screen: %s"
                                      % (test_id or text or contains, " | ".join(self.texts())[:1500]))
             time.sleep(0.7)
+
+    def dismiss_not_responding(self) -> bool:
+        """Slow emulators show "… isn't responding" for system apps. Choose Wait; True if one was shown."""
+        if self.find(contains="isn't responding") is None:
+            return False
+        wait = self.find(text="Wait")
+        if wait is not None:
+            x, y = self._center(wait)
+            self.shell("input tap %d %d" % (x, y))
+        time.sleep(3)
+        return True
 
     def gone(self, test_id: str = None, text: str = None, contains: str = None, timeout: float = 30):
         deadline = time.time() + timeout

@@ -9,7 +9,7 @@
 # must be, byte for byte, what was put into the library.
 set -euo pipefail
 
-: "${SIM_UDID:?set SIM_UDID to the simulator's id}"
+: "${SIM_UDID:?set SIM_UDID to the id of the simulator}"
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 SHOTS=${1:-"$REPO/ios-shots"}
 WORK=$(mktemp -d)
@@ -44,7 +44,9 @@ echo "[e2e] the app: setup, backup, restore on the phone"
 
 echo "[e2e] the PC restores the phone's backup with the recovery key the app showed"
 KEY=$(xcrun simctl pbpaste "$SIM_UDID")
-test "$(printf %s "$KEY" | tr -d '-' | wc -c | tr -d ' ')" = 56
+# (kept simple on purpose: the bash that ships with macOS is old)
+KEY_LENGTH=$(printf %s "$KEY" | tr -d - | wc -c | tr -d " ")
+test "$KEY_LENGTH" = 56
 TUCKVAULT_PHONE_KEY="$KEY" "$PY" -m tuckvault phone restore "$WORK/out"
 "$PY" - "$WORK" <<'PYEOF'
 import hashlib, sys
