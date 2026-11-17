@@ -1,0 +1,95 @@
+# Drives the app in an iOS simulator from first start to a restored photo.
+# Run by mobile/e2e/run_ios.sh, which starts `tuckvault serve` on the Mac and passes the pairing code:
+#
+#     maestro test -e CODE=ABCD-EFGH mobile/e2e/ios-flow.yaml
+appId: io.github.karacanil.tuckvault
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: "get-started"
+    timeout: 60000
+- takeScreenshot: ios-01-welcome
+- tapOn:
+    id: "get-started"
+
+# connect to the computer (the simulator shares the Mac's own address)
+- tapOn:
+    id: "address"
+- inputText: "127.0.0.1"
+- tapOn:
+    id: "code"
+- inputText: ${CODE}
+- tapOn: "On your computer"
+- tapOn:
+    id: "connect"
+
+# the recovery key: copied, so the test can hand it to the PC program afterwards
+- extendedWaitUntil:
+    visible:
+      id: "key-saved"
+    timeout: 30000
+- tapOn: "Copy"
+- tapOn:
+    id: "key-saved"
+- takeScreenshot: ios-02-recovery-key-step
+- tapOn:
+    id: "key-continue"
+
+# what to back up
+- tapOn:
+    id: "toggle-photos"
+- tapOn:
+    text: "Allow Full Access"
+    optional: true
+- tapOn:
+    text: "Allow Access to All Photos"
+    optional: true
+- takeScreenshot: ios-03-choose
+- tapOn:
+    id: "finish-setup"
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# first backup
+- extendedWaitUntil:
+    visible:
+      id: "backup-now"
+    timeout: 30000
+- assertVisible: "Not backed up yet"
+- tapOn:
+    id: "backup-now"
+- extendedWaitUntil:
+    visible: "Your phone is backed up"
+    timeout: 240000
+- takeScreenshot: ios-04-backed-up
+
+# get a photo back from the backup into the library
+- tapOn:
+    id: "tab-backups"
+- extendedWaitUntil:
+    visible:
+      id: "backup-0"
+    timeout: 30000
+- takeScreenshot: ios-05-backups
+- tapOn:
+    id: "backup-0"
+- extendedWaitUntil:
+    visible:
+      id: "file-0"
+    timeout: 30000
+- tapOn:
+    id: "file-0"
+- tapOn:
+    id: "save-to-photos"
+- tapOn:
+    text: "Allow Full Access"
+    optional: true
+- extendedWaitUntil:
+    visible: "Restored"
+    timeout: 60000
+- assertVisible: "1 item saved to your photo library."
+- takeScreenshot: ios-06-restored
+- tapOn: "OK"

@@ -108,7 +108,7 @@ jobs:
           path: mobile/android/app/build/outputs/apk/release/app-release.apk
 
   ios:
-    name: iOS build and start in the simulator
+    name: iOS build and run in a simulator
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -140,17 +140,23 @@ jobs:
           xcodebuild -workspace Tuckvault.xcworkspace -scheme Tuckvault -configuration Release \
             -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO build | tail -n 60
-      - name: Start it in the simulator and take a picture
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Tools for the simulator test
+        run: |
+          python -m pip install -r requirements.txt pillow==13.0.0
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Set up, back up and restore in the simulator; the PC restores it too
+        env:
+          PYTHON: python
+          MAESTRO_CLI_NO_ANALYTICS: "1"
         run: |
           xcrun simctl boot "$SIM_UDID"
           xcrun simctl bootstatus "$SIM_UDID" -b
           xcrun simctl install "$SIM_UDID" mobile/ios/build/Build/Products/Release-iphonesimulator/Tuckvault.app
-          xcrun simctl launch "$SIM_UDID" io.github.karacanil.tuckvault
-          sleep 25
-          mkdir -p ios-shots
-          xcrun simctl io "$SIM_UDID" screenshot ios-shots/01-welcome.png
-          # the app must still be running (a crash at start would have ended it)
-          xcrun simctl spawn "$SIM_UDID" launchctl list | grep io.github.karacanil.tuckvault
+          bash mobile/e2e/run_ios.sh "$PWD/ios-shots"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

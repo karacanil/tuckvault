@@ -17,7 +17,8 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
-        }
+        },
+        "UIViewControllerBasedStatusBarAppearance": false
       }
     },
     "android": {
