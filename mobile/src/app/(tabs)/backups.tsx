@@ -7,7 +7,7 @@ import { BackupError } from '../../lib/client';
 import type { BackupInfo } from '../../lib/engine';
 import { humanSize, localDateTime, plural } from '../../lib/format';
 import { backups, useActivity } from '../../lib/runner';
-import { Card, Empty, H1, Loading, Notice, P, Row } from '../../ui/kit';
+import { Bar, Card, Empty, H1, Loading, Notice, P, Row } from '../../ui/kit';
 import { space, useTheme } from '../../ui/theme';
 
 export default function Backups() {
@@ -41,6 +41,7 @@ export default function Backups() {
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top + space.lg }}>
+      <Bar />
       <View style={{ paddingHorizontal: space.lg, marginBottom: space.md }}>
         <H1>Backups</H1>
         <P muted style={{ marginTop: 4 }}>Every backup on your computer. Open one to get files back.</P>

@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { Image, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { nextSetupStep } from '../lib/setup';
+import { Bar } from '../ui/kit';
 import type { IconName } from '../ui/kit';
 import { BRAND_BOTTOM, BRAND_TOP, radius, space } from '../ui/theme';
 
@@ -20,7 +20,7 @@ export default function Welcome() {
   return (
     <LinearGradient colors={[BRAND_TOP, BRAND_BOTTOM]} style={{ flex: 1, paddingTop: insets.top + space.xxl,
                     paddingBottom: insets.bottom + space.xl, paddingHorizontal: space.xl }}>
-      <StatusBar style="light" />
+      <Bar light />
       <View style={{ alignItems: 'center' }}>
         <Image source={require('../../assets/splash-icon.png')} style={{ width: 132, height: 132 }}
                accessibilityIgnoresInvertColors accessibilityLabel="Tuckvault logo" />

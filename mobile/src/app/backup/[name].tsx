@@ -10,7 +10,7 @@ import { BackupError } from '../../lib/client';
 import type { FileEntry, Manifest } from '../../lib/engine';
 import { baseName, humanSize, localDateTime, plural } from '../../lib/format';
 import { backupContents, fetchFile, isMedia } from '../../lib/runner';
-import { Button, Empty, Loading, Notice, P, ProgressBar } from '../../ui/kit';
+import { Bar, Button, Empty, Loading, Notice, P, ProgressBar } from '../../ui/kit';
 import { radius, space, useTheme } from '../../ui/theme';
 
 type Job = { title: string; done: number; total: number; text: string } | null;
@@ -89,6 +89,7 @@ export default function BackupDetail() {
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
+      <Bar />
       <Stack.Screen options={{ title: localDateTime(manifest.created) }} />
       <View style={{ paddingHorizontal: space.lg, paddingBottom: space.md }}>
         <P muted>{plural(manifest.stats.files, 'file')}  ·  {humanSize(manifest.stats.bytes)}  ·  from {manifest.host}</P>

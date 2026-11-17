@@ -1,5 +1,4 @@
 import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
 import '../lib/background'; // defines the automatic-backup task as soon as the app's code loads
@@ -17,7 +16,6 @@ export default function Layout() {
   }, []);
   return (
     <>
-      <StatusBar style={t.dark ? 'light' : 'dark'} />
       <Stack screenOptions={{
         headerStyle: { backgroundColor: t.bg },
         headerShadowVisible: false,

@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
 import { AppState, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,7 +11,7 @@ import type { Result } from '../../lib/engine';
 import { ago, baseName, describeRun, humanSize, plural } from '../../lib/format';
 import { autoBlocker, cancel, session, startBackup, useActivity } from '../../lib/runner';
 import { useRunState, useSettings } from '../../lib/store';
-import { Card, Notice, P, ProgressBar, Row, SectionTitle } from '../../ui/kit';
+import { Bar, Card, Notice, P, ProgressBar, Row, SectionTitle } from '../../ui/kit';
 import type { IconName } from '../../ui/kit';
 import { BRAND_BOTTOM, BRAND_TOP, radius, space, useTheme } from '../../ui/theme';
 
@@ -104,7 +103,7 @@ export default function Home() {
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
-      <StatusBar style="light" />
+      <Bar light />
       <ScrollView contentContainerStyle={{ paddingBottom: space.xxl }}>
         <LinearGradient colors={[BRAND_TOP, BRAND_BOTTOM]} start={{ x: 0, y: 0 }} end={{ x: 0.6, y: 1 }}
                         style={{ paddingTop: insets.top + space.xl, paddingHorizontal: space.xl, paddingBottom: space.xl,
@@ -174,7 +173,7 @@ export default function Home() {
           ) : null}
 
           <Card padded={false}>
-            <Row testID="row-computer" first icon="desktop-outline" title={settings.server?.name || 'Your computer'} detail={reach.text}
+            <Row testID="row-computer" first icon="desktop-outline" title="Your computer" detail={reach.text}
                  right={<View style={{ width: 12, height: 12, borderRadius: 6,
                                        backgroundColor: reach.state === 'ok' ? t.good : reach.state === 'down' ? t.bad : t.faint }} />} />
             <Row icon="sync-outline" title="Automatic backup"
@@ -190,7 +189,7 @@ export default function Home() {
           <SectionTitle>What is backed up</SectionTitle>
           <Card padded={false}>
             <Row first icon="images-outline" title="Photos and videos"
-                 detail={settings.photos ? (settings.videos ? 'Photos and videos' : 'Photos only') : 'Off'}
+                 detail={settings.photos ? (settings.videos ? 'Everything in your library' : 'Photos only, no videos') : 'Off'}
                  onPress={() => router.push('/(tabs)/settings')} />
             <Row icon="folder-outline" title="Files"
                  detail={Platform.OS === 'ios' ? (settings.inbox ? 'The Tuckvault folder in the Files app' : 'Off')

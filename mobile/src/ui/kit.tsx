@@ -1,6 +1,8 @@
 /** The building blocks every screen is made of. */
 
 import { Ionicons } from '@expo/vector-icons';
+import { useIsFocused } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import type { ComponentProps, ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import type { StyleProp, TextInputProps, TextStyle, ViewStyle } from 'react-native';
@@ -9,6 +11,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius, space, useTheme } from './theme';
 
 export type IconName = ComponentProps<typeof Ionicons>['name'];
+
+/**
+ * Status bar icons for the screen that is in front. Screens underneath stay mounted, so each
+ * one only speaks while it is the focused one. light: white icons, for the gradient screens.
+ */
+export function Bar({ light }: { light?: boolean }) {
+  const t = useTheme();
+  return useIsFocused() ? <StatusBar style={light || t.dark ? 'light' : 'dark'} /> : null;
+}
 
 export function Screen({ children, scroll = true, footer, padTop = false }: {
   children: ReactNode; scroll?: boolean; footer?: ReactNode; padTop?: boolean;
@@ -19,6 +30,7 @@ export function Screen({ children, scroll = true, footer, padTop = false }: {
                 paddingBottom: space.xl + (footer ? 0 : insets.bottom) };
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
+      <Bar />
       {scroll ? (
         <ScrollView contentContainerStyle={pad} keyboardShouldPersistTaps="handled">{children}</ScrollView>
       ) : (
