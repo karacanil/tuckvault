@@ -15,13 +15,15 @@ appId: io.github.karacanil.tuckvault
     id: "get-started"
 
 # connect to the computer (the simulator shares the Mac's own address)
+# Return puts the keyboard away after each box; otherwise it covers the next one on a small screen.
 - tapOn:
     id: "address"
 - inputText: "127.0.0.1"
+- pressKey: Enter
 - tapOn:
     id: "code"
 - inputText: ${CODE}
-- tapOn: "On your computer"
+- pressKey: Enter
 - takeScreenshot: ios-01b-before-connect
 - tapOn:
     id: "connect"
