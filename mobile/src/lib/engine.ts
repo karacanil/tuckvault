@@ -10,6 +10,8 @@ import type { Platform } from './platform.ts';
 export const CHUNK = 4 * 1024 * 1024;
 const VERIFY_BATCH = 200;
 const SAVE_EVERY_MS = 20_000;
+/** While another phone made a backup in the same vault this recently, unlisted data is not cleaned up. */
+const OTHER_PHONE_QUIET_DAYS = 14;
 /** Pause before an upload is tried again grows from this (tests shorten it). */
 export const tuning = { retryMs: 1000 };
 
@@ -65,6 +67,10 @@ export type Result = {
   snapshot?: string;
   /** Files still to go when a run stopped early. */
   remaining?: number;
+  /** Nothing had changed since the newest backup, so no new one was written. */
+  unchanged?: boolean;
+  /** Every stored piece of every backup was re-checked during this run. */
+  scrubbed?: boolean;
 };
 
 export type Session = {
@@ -121,6 +127,16 @@ function message(e: unknown): string {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** True if the native module says stored data failed its checks (rather than some other failure). */
+function isDamage(e: unknown): boolean {
+  return !!e && typeof e === 'object' && (e as { code?: unknown }).code === 'ERR_INTEGRITY';
+}
+
+/** What makes two backups the same: the same files with the same content, in the same places. */
+function fingerprint(files: FileEntry[]): string {
+  return files.map((f) => f.p + '\u0000' + f.s + '\u0000' + f.c.join(',')).join('\n');
+}
+
 /** Make sure the vault exists and belongs to this key. Returns its id and the free space. */
 export async function openVault(s: Session, create: boolean): Promise<{ id: string; free: number | null }> {
   const { core } = s.platform;
@@ -153,12 +169,20 @@ export async function manifest(s: Session, name: string): Promise<Manifest> {
   }
   const tmp = s.platform.tmp('index-' + s.platform.core.randomHex(4) + '.snap');
   try {
-    await s.client.getSnapshot(name, tmp);
-    let text: string;
-    try {
-      text = await s.platform.core.openSnapshot(s.master, tmp);
-    } catch (e) {
-      throw new BackupError('integrity', 'A backup index is damaged or was written with another key (' + message(e) + ').');
+    let text = '';
+    for (let attempt = 0; ; attempt++) {
+      await s.client.getSnapshot(name, tmp);
+      try {
+        text = await s.platform.core.openSnapshot(s.master, tmp);
+        break;
+      } catch (e) {
+        // A download that was cut short looks like damage too, so it is fetched once more before
+        // it is believed. Anything else (out of memory, a full disk) is not damage at all.
+        if (!isDamage(e)) throw new BackupError('device', 'A backup index could not be opened on this phone (' + message(e) + ').');
+        if (attempt >= 1) {
+          throw new BackupError('integrity', 'A backup index is damaged or was written with another key (' + message(e) + ').');
+        }
+      }
     }
     const parsed = JSON.parse(text) as Manifest;
     // An index must sit under the name it was made with, so an old backup cannot pose as a new one.
@@ -308,13 +332,15 @@ async function backup(o: BackupOptions, result: Result, keep: (c: Cache) => void
             report(o.progress, 'backup', done + size, Math.max(total, done + size), item.path, index, o.items.length);
             if (sealed.read < CHUNK) break;
             if (o.cancelled && o.cancelled()) throw new BackupError('cancelled', 'Stopped.');
+            if (o.deadline && platform.now() > o.deadline) throw new BackupError('out_of_time', 'Out of time.');
           }
           if (item.size !== null && size !== item.size) warnings.push('Changed while being backed up: ' + item.path);
           result.newFiles += 1;
         } catch (e) {
           if (e instanceof BackupError) {
-            if (e.code === 'cancelled') {
-              stopped = 'cancelled';
+            if (e.code === 'cancelled' || e.code === 'out_of_time') {
+              // the pieces already sent stay; the file is read again from the start next time
+              stopped = e.code === 'cancelled' ? 'cancelled' : 'partial';
               result.remaining = o.items.length - index;
               break;
             }
@@ -363,6 +389,25 @@ async function backup(o: BackupOptions, result: Result, keep: (c: Cache) => void
   }
 
   entries.sort((a, b) => (a.p.toLowerCase() < b.p.toLowerCase() ? -1 : a.p.toLowerCase() > b.p.toLowerCase() ? 1 : 0));
+
+  // If the newest backup of this phone already holds exactly this, there is nothing to add.
+  // Automatic runs happen several times a day; without this they would push real history
+  // out of the "newest N" within days.
+  if (!result.newFiles && !warnings.length) {
+    const same = await unchangedSince(o, entries);
+    if (same) {
+      result.snapshot = same;
+      result.unchanged = true;
+      if (o.scrub) {
+        const problems = await scrub(o, o.progress);
+        result.scrubbed = true;
+        if (problems) warnings.push(problems);
+      }
+      await prune(o, o.keepLast, same, o.progress, o.host); // the number to keep may have been lowered
+      result.status = warnings.length ? 'warning' : 'success';
+      return;
+    }
+  }
   const now = platform.now();
   const name = snapshotName(now, core.randomHex(3));
   const made: Manifest = { v: 1, name, created: iso(now), host: o.host, sources: o.sources, files: entries,
@@ -387,11 +432,32 @@ async function backup(o: BackupOptions, result: Result, keep: (c: Cache) => void
       'The backup is not complete.');
   }
 
-  let problems: string | null = null;
-  if (o.scrub) problems = await scrub(o, o.progress);
-  await prune(o, o.keepLast, name, o.progress);
-  if (problems) throw new BackupError('damaged', problems);
+  if (o.scrub) {
+    // Damage in older backups is told to the user, but this new backup is complete and counts.
+    const problems = await scrub(o, o.progress);
+    result.scrubbed = true;
+    if (problems) warnings.push(problems);
+  }
+  await prune(o, o.keepLast, name, o.progress, o.host);
   result.status = warnings.length ? 'warning' : 'success';
+}
+
+/** Name of this phone's newest backup if it holds exactly these files from these sources, else null. */
+async function unchangedSince(o: BackupOptions, entries: FileEntry[]): Promise<string | null> {
+  const names = (await o.client.listSnapshots()).reverse();
+  for (const name of names.slice(0, 20)) {
+    let m: Manifest;
+    try {
+      m = await manifest(o, name);
+    } catch (e) {
+      if (e instanceof BackupError && e.code === 'integrity') return null;
+      throw e;
+    }
+    if (m.host !== o.host) continue; // another phone that shares this key
+    const sameSources = m.sources.length === o.sources.length && m.sources.every((s) => o.sources.includes(s));
+    return sameSources && fingerprint(m.files) === fingerprint(entries) ? name : null;
+  }
+  return null;
 }
 
 /** Re-check every stored piece of every backup. Returns a description of what is wrong, or null. */
@@ -430,10 +496,18 @@ export async function scrub(s: Session, progress?: (p: Progress) => void): Promi
   return parts.join(' ') || null;
 }
 
-/** Drop old backups (keeping the newest `keepLast` of every source), then data nothing refers to. */
+/**
+ * Drop old backups, then data nothing refers to.
+ *
+ * The newest `keepLast` backups are kept for every source of every phone. Phones that share
+ * a recovery key share a vault; counting per phone means one phone's daily backups never push
+ * out another's, and a phone that is gone keeps its last backups for good.
+ */
 export async function prune(s: Session, keepLast: number, protect: string | null,
-                            progress?: (p: Progress) => void): Promise<void> {
+                            progress?: (p: Progress) => void, host: string = ''): Promise<void> {
   let names = await s.client.listSnapshots();
+  let othersBusy = false;
+  const recent = s.platform.now() - OTHER_PHONE_QUIET_DAYS * 86400_000;
   if (keepLast > 0) {
     const keep = new Set<string>(protect ? [protect] : []);
     const count = new Map<string, number>();
@@ -441,18 +515,21 @@ export async function prune(s: Session, keepLast: number, protect: string | null
     for (let pos = 0; pos < newestFirst.length; pos++) {
       const name = newestFirst[pos];
       let sources: string[];
+      let owner: string;
       try {
-        sources = (await manifest(s, name)).sources;
-        if (!Array.isArray(sources) || !sources.length) sources = [''];
+        const m = await manifest(s, name);
+        sources = Array.isArray(m.sources) && m.sources.length ? m.sources : [''];
+        owner = String(m.host || '');
       } catch (e) {
         if (!(e instanceof BackupError && e.code === 'integrity')) throw e;
         if (pos < keepLast) keep.add(name); // unreadable ones only age out
         continue;
       }
       for (const source of sources) {
-        const n = count.get(source) || 0;
+        const bucket = owner + '\u0000' + source;
+        const n = count.get(bucket) || 0;
         if (n < keepLast) {
-          count.set(source, n + 1);
+          count.set(bucket, n + 1);
           keep.add(name);
         }
       }
@@ -473,7 +550,11 @@ export async function prune(s: Session, keepLast: number, protect: string | null
       throw e;
     }
     for (const f of m.files) for (const blob of f.c) used.add(blob);
+    if (String(m.host || '') !== host && Date.parse(m.created) > recent) othersBusy = true;
   }
+  // Another phone that shares this vault may be in the middle of a backup: what it has sent
+  // but not yet listed in a backup must not be taken for rubbish.
+  if (othersBusy) return;
   const unused = [...(await s.client.listBlobs()).keys()].filter((b) => !used.has(b));
   if (unused.length) {
     report(progress, 'prune', 0, 0, 'Removing data no backup needs any more…');

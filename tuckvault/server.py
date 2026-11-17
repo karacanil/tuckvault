@@ -102,8 +102,9 @@ def pair(code: str, name: str, platform: str = "") -> dict:
     st = load()
     pending = st.get("pairing")
     if not isinstance(pending, dict) or time.time() > float(pending.get("expires") or 0):
-        st.pop("pairing", None)
-        save(st)
+        if "pairing" in st:  # only an expired pairing is worth a write; strangers knocking are not
+            st.pop("pairing", None)
+            save(st)
         raise _Reply(403, "no_pairing", "No pairing is in progress on the computer. "
                                         "Start it there and use the new code.")
     if not hmac.compare_digest(str(pending.get("hash")), _code_hash(code)):
@@ -378,8 +379,8 @@ class Handler(BaseHTTPRequestHandler):
 
         m = _ROUTE.fullmatch(url.path)
         device = self._known_device()
-        blob_upload = bool(m and m.group(2) == "blobs" and method == "PUT")
-        body = self._body(MAX_BLOB if blob_upload else MAX_JSON) if method in ("POST", "PUT") else b""
+        upload = bool(m and m.group(2) in ("blobs", "snapshots") and method == "PUT")
+        body = self._body(MAX_BLOB if upload else MAX_JSON) if method in ("POST", "PUT") else b""
         self._check_signature(device, body)
         if url.path == "/v1/whoami" and method == "GET":
             return self._json({"ok": True, "name": socket.gethostname(), "version": __version__})
@@ -485,7 +486,9 @@ class Handler(BaseHTTPRequestHandler):
 
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = False
+    # Windows lets another program take over a port opened this way, so it is only used elsewhere,
+    # where it merely allows listening again right after a restart.
+    allow_reuse_address = sys.platform != "win32"
 
     def handle_error(self, request, client_address):  # a dropped connection is not news
         log.debug("phone connection from %s ended with an error", client_address[0])
@@ -510,7 +513,11 @@ def _tailscale_exe():
 
 
 def tailscale_addresses() -> list:
-    """This computer's Tailscale IPv4 addresses (empty if Tailscale is not running)."""
+    """This computer's Tailscale IPv4 addresses (empty if Tailscale is not running).
+
+    Only what Tailscale itself reports: some internet providers hand out addresses from
+    the same range, and those must never be listened on.
+    """
     found = set()
     exe = _tailscale_exe()
     if exe:
@@ -520,12 +527,6 @@ def tailscale_addresses() -> list:
             found.update(line.strip() for line in out.splitlines() if _is_tailscale(line.strip()))
         except (OSError, subprocess.SubprocessError):
             pass
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            if _is_tailscale(info[4][0]):
-                found.add(info[4][0])
-    except OSError:
-        pass
     return sorted(found)
 
 

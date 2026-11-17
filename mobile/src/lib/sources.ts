@@ -46,7 +46,10 @@ async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
       'Allow it in the phone\'s settings.');
     return; // not listed as a source: the photo backups already made are kept
   }
-  out.sources.push('Photos');
+  // With access to selected photos only, what is seen is not the library. It is kept as a source
+  // of its own, so these smaller backups never count against (and push out) backups of everything.
+  const source = access === 'limited' ? 'Photos (selected)' : 'Photos';
+  out.sources.push(source);
   for (let offset = 0; ; offset += PAGE) {
     const page = await new Query().orderBy({ key: AssetField.CREATION_TIME, ascending: true })
       .limit(PAGE).offset(offset).exeForMetadata();
@@ -60,7 +63,7 @@ async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
       const id = asset.id;
       out.items.push({
         key: 'photo:' + id,
-        source: 'Photos',
+        source,
         path: photoPath(asset.filename, id, created),
         // Android names a photo by an address the native code can read directly; on iOS it has to be asked for.
         uri: RN.OS === 'android' ? id : () => new Asset(id).getUri(),

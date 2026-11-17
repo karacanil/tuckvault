@@ -20,7 +20,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tuckvault import __main__ as cli  # noqa: E402
-from tuckvault import config, crypto, engine, phones, scheduler, server  # noqa: E402
+from tuckvault import config, crypto, engine, paths, phones, scheduler, server  # noqa: E402
 
 
 class Phone:
@@ -317,6 +317,23 @@ class Vault(Base):
             "X-Tuckvault-Time": when, "X-Tuckvault-Sign": server.signature(
                 self.phone.secret, "PUT", path, when, hashlib.sha256(b"").hexdigest())})
         self.assertEqual(status, 413)
+
+    def test_a_large_backup_index_is_accepted(self):
+        # the index of a big photo library is many megabytes; it must not hit the small-request limit
+        keys, base, _ = self.new_vault()
+        raw = os.urandom(server.MAX_JSON + 100_000)
+        self.assertEqual(self.phone.call("PUT", base + "/snapshots/20260101T000000.000000Z-aaaaaa.snap", raw)[0], 200)
+        status, got = self.phone.call("GET", base + "/snapshots/20260101T000000.000000Z-aaaaaa.snap")
+        self.assertEqual(got, raw)
+
+    def test_knocking_without_a_pairing_changes_nothing_on_disk(self):
+        self.paired()
+        before = paths.phones_file().read_bytes()
+        stamp = paths.phones_file().stat().st_mtime_ns
+        for _ in range(3):
+            self.assertEqual(Phone(self.service.port).pair("AAAA-AAAA")[0], 403)
+        self.assertEqual(paths.phones_file().read_bytes(), before)
+        self.assertEqual(paths.phones_file().stat().st_mtime_ns, stamp)
 
     def test_two_phones_share_a_vault_with_the_same_key(self):
         keys, base, master = self.new_vault()

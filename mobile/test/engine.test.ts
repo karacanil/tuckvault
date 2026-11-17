@@ -78,14 +78,14 @@ after(() => {
 });
 
 /** A freshly paired phone with its own key and files. */
-async function phone(name: string) {
+async function phone(name: string, sharedKey?: string) {
   const dir = path.join(tmp, name);
   const platform: NodePlatform = nodePlatform(path.join(dir, 'tmp'));
   const shown = python(['phone', 'pair']);
   const code = /Code:\s+(\S+)/.exec(shown.out)?.[1];
   assert.ok(code, shown.out);
   const server: Server = await pair(platform, url, code, name, 'test');
-  const master = platform.core.newMasterKey();
+  const master = sharedKey || platform.core.newMasterKey();
   const session: Session = { platform, master, manifestDir: path.join(dir, 'manifests') + path.sep,
                              client: new Client(platform, server, platform.core.keyCheck(master).slice(0, 24)) };
   const files = path.join(dir, 'files');
@@ -170,12 +170,16 @@ test('later backups send only what changed, and old ones are tidied away', async
   p.write('Photos/b.jpg', crypto.randomBytes(30_000));
   assert.equal((await p.backup()).status, 'success');
 
+  // nothing changed: nothing is sent and no new backup is written, so automatic runs
+  // several times a day do not push real history out of the newest N
+  const first = (await listBackups(p.session))[0].name;
   p.platform.uploads = 0;
   const second = await p.backup();
   assert.equal(second.status, 'success');
-  assert.equal(second.newFiles, 0);
-  assert.equal(second.uploadedBytes, 0);
-  assert.equal(p.platform.uploads, 1); // only the new index
+  assert.equal(second.unchanged, true);
+  assert.equal(second.snapshot, first);
+  assert.equal(p.platform.uploads, 0);
+  assert.equal((await listBackups(p.session)).length, 1);
 
   p.write('Photos/c.jpg', crypto.randomBytes(30_000));
   fs.rmSync(path.join(p.files, 'Photos', 'a.jpg'));
@@ -192,6 +196,71 @@ test('later backups send only what changed, and old ones are tidied away', async
   const fourth = await p.backup({ keepLast: 1 });
   assert.equal(fourth.status, 'success');
   assert.equal(blobFiles(p.platform.core.keyCheck(p.master).slice(0, 24)).length, 2);
+});
+
+test('two phones that share a recovery key do not push out each other\'s backups', async () => {
+  const old = await phone('old-pixel');
+  old.write('Photos/holiday.jpg', crypto.randomBytes(20_000));
+  const kept = await old.backup({ keepLast: 2 });
+  assert.equal(kept.status, 'success');
+
+  // the replacement phone continues with the same key and backs up many times
+  const fresh = await phone('new-pixel', old.master);
+  for (let i = 0; i < 4; i++) {
+    fresh.write('Photos/new-' + i + '.jpg', crypto.randomBytes(5000));
+    assert.equal((await fresh.backup({ keepLast: 2 })).status, 'success');
+  }
+  const all = await listBackups(fresh.session);
+  assert.equal(all.filter((b) => b.host === 'new-pixel').length, 2);
+  assert.equal(all.filter((b) => b.host === 'old-pixel').length, 1, 'the old phone\'s backup must survive');
+  const out = path.join(fresh.dir, 'holiday.jpg');
+  const entry = (await manifest(fresh.session, kept.snapshot!)).files[0];
+  await restoreFile(fresh.session, entry, out);
+  assert.deepEqual(fs.readFileSync(out), fs.readFileSync(path.join(old.files, 'Photos', 'holiday.jpg')));
+
+  // while the other phone was active recently, data that no backup lists yet is left alone:
+  // it may belong to a backup that phone is in the middle of
+  const vault = fresh.platform.core.keyCheck(fresh.master).slice(0, 24);
+  const before = blobFiles(vault).length;
+  fs.rmSync(path.join(fresh.files, 'Photos', 'new-3.jpg'));
+  fresh.write('Photos/new-9.jpg', crypto.randomBytes(5000));
+  assert.equal((await fresh.backup({ keepLast: 1 })).status, 'success');
+  assert.ok(blobFiles(vault).length >= before, 'nothing may be cleaned up while another phone shares the vault');
+});
+
+test('damage found in an old backup is reported, but the new backup still counts', async () => {
+  const p = await phone('scrubbed');
+  p.write('Photos/gone-later.jpg', crypto.randomBytes(9000));
+  p.write('Photos/stays.jpg', crypto.randomBytes(9000));
+  const first = await p.backup();
+  const gone = (await manifest(p.session, first.snapshot!)).files.find((f) => f.p === 'Photos/gone-later.jpg')!;
+  // the photo is deleted from the phone, and its stored piece rots on the computer
+  fs.rmSync(path.join(p.files, 'Photos', 'gone-later.jpg'));
+  const vault = p.platform.core.keyCheck(p.master).slice(0, 24);
+  fs.writeFileSync(blobFiles(vault).find((f) => f.endsWith(gone.c[0]))!, 'rotten');
+  const second = await p.backup({ scrub: true });
+  assert.equal(second.status, 'warning', JSON.stringify(second));
+  assert.equal(second.scrubbed, true);
+  assert.match(second.warnings.join(' '), /1 stored pieces were damaged or missing/);
+  assert.ok(second.snapshot && second.snapshot !== first.snapshot);
+  // and it does not keep failing: the next ordinary run is fine
+  p.write('Photos/another.jpg', crypto.randomBytes(100));
+  assert.equal((await p.backup()).status, 'success');
+});
+
+test('a run that is out of time in the middle of a large file stops there', async () => {
+  const p = await phone('big-file');
+  p.write('Photos/long-video.mp4', crypto.randomBytes(CHUNK * 3 + 5));
+  let pieces = 0;
+  const first = await p.backup({ deadline: Date.now() + 60_000,
+    progress: (x) => { if (x.phase === 'backup' && x.done > 0 && ++pieces === 2) p.platform.skewMs = 120_000; } });
+  p.platform.skewMs = 0;
+  assert.equal(first.status, 'partial', JSON.stringify(first));
+  assert.equal(first.remaining, 1);
+  p.platform.uploads = 0;
+  const second = await p.backup();
+  assert.equal(second.status, 'success');
+  assert.ok(p.platform.uploads <= 3, 'pieces sent before the stop are not sent again'); // 2 left + the index
 });
 
 test('a source that was not looked at keeps its backups', async () => {

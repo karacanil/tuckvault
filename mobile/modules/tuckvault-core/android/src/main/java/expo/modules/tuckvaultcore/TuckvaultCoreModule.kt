@@ -231,7 +231,11 @@ class TuckvaultCoreModule : Module() {
     return mapOf("size" to size, "mtime" to mtime, "name" to name)
   }
 
-  /** Every file below a folder: [{uri, path, size, mtime}], path relative to the folder with "/". */
+  /**
+   * Every file below a folder: [{uri, path, size, mtime}], path relative to the folder with "/".
+   * A folder that cannot be listed fails the whole call: reporting it as empty would make its
+   * files look deleted.
+   */
   private fun listTree(root: Uri): List<Map<String, Any?>> {
     val out = ArrayList<Map<String, Any?>>()
     if (isFile(root)) {
@@ -241,7 +245,8 @@ class TuckvaultCoreModule : Module() {
       stack.addLast(Pair(base, ""))
       while (stack.isNotEmpty()) {
         val (dir, prefix) = stack.removeLast()
-        for (f in dir.listFiles() ?: emptyArray()) {
+        val children = dir.listFiles() ?: throw java.io.IOException("Cannot list the folder " + dir.name)
+        for (f in children) {
           if (java.nio.file.Files.isSymbolicLink(f.toPath())) continue
           if (f.isDirectory) stack.addLast(Pair(f, prefix + f.name + "/"))
           else if (f.isFile) out.add(mapOf("uri" to Uri.fromFile(f).toString(), "path" to prefix + f.name,
@@ -263,9 +268,11 @@ class TuckvaultCoreModule : Module() {
     var folders = 0
     while (stack.isNotEmpty()) {
       val (docId, prefix) = stack.removeLast()
-      if (++folders > 20000) break  // a provider that loops; real trees do not get near this
+      if (++folders > 50000) throw java.io.IOException("The folder has too many subfolders to list")
       val children = DocumentsContract.buildChildDocumentsUriUsingTree(root, docId)
-      resolver.query(children, columns, null, null, null)?.use { c ->
+      val cursor = resolver.query(children, columns, null, null, null)
+        ?: throw java.io.IOException("The folder could not be listed")
+      cursor.use { c ->
         while (c.moveToNext()) {
           val id = c.getString(0) ?: continue
           val name = (c.getString(1) ?: continue).replace('/', '_')

@@ -22,6 +22,19 @@ function derive(master: Buffer, label: string): Buffer {
 
 const sha256 = (data: Buffer | string) => crypto.createHash('sha256').update(data).digest();
 
+/** Stored data failed its checks; carries the same code as the native module's error. */
+function damage(text: string): Error {
+  return Object.assign(new Error(text), { code: 'ERR_INTEGRITY' });
+}
+
+function authenticated(work: () => Buffer, what: string): Buffer {
+  try {
+    return work();
+  } catch {
+    throw damage(what + ' failed authentication');
+  }
+}
+
 function local(uri: string): string {
   return uri.startsWith('file://') ? decodeURIComponent(new URL(uri).pathname).replace(/^\/([A-Za-z]:)/, '$1') : uri;
 }
@@ -48,13 +61,13 @@ export function sealChunkBytes(master: Buffer, data: Buffer): { name: string; bl
 }
 
 export function openChunkBytes(master: Buffer, name: string, blob: Buffer): Buffer {
-  if (sha256(blob).toString('hex') !== name) throw new Error('blob does not match its hash');
-  if (blob.length < 33 || !blob.subarray(0, 4).equals(BLOB_MAGIC)) throw new Error('not a Tuckvault blob');
+  if (sha256(blob).toString('hex') !== name) throw damage('blob does not match its hash');
+  if (blob.length < 33 || !blob.subarray(0, 4).equals(BLOB_MAGIC)) throw damage('not a Tuckvault blob');
   const header = blob.subarray(0, 5);
   const decipher = crypto.createDecipheriv('aes-256-gcm', derive(master, 'chunk-encryption'), blob.subarray(5, 17));
   decipher.setAAD(header);
   decipher.setAuthTag(blob.subarray(blob.length - 16));
-  const body = Buffer.concat([decipher.update(blob.subarray(17, blob.length - 16)), decipher.final()]);
+  const body = authenticated(() => Buffer.concat([decipher.update(blob.subarray(17, blob.length - 16)), decipher.final()]), 'blob');
   return header[4] === 1 ? zlib.inflateSync(body) : body;
 }
 
@@ -66,11 +79,11 @@ export function sealSnapshotBytes(master: Buffer, json: string, nonce = crypto.r
 }
 
 export function openSnapshotBytes(master: Buffer, raw: Buffer): string {
-  if (raw.length < 32 || !raw.subarray(0, 4).equals(SNAP_MAGIC)) throw new Error('not a Tuckvault snapshot');
+  if (raw.length < 32 || !raw.subarray(0, 4).equals(SNAP_MAGIC)) throw damage('not a Tuckvault snapshot');
   const decipher = crypto.createDecipheriv('aes-256-gcm', derive(master, 'snapshot-encryption'), raw.subarray(4, 16));
   decipher.setAAD(SNAP_MAGIC);
   decipher.setAuthTag(raw.subarray(raw.length - 16));
-  return zlib.inflateSync(Buffer.concat([decipher.update(raw.subarray(16, raw.length - 16)), decipher.final()])).toString('utf8');
+  return zlib.inflateSync(authenticated(() => Buffer.concat([decipher.update(raw.subarray(16, raw.length - 16)), decipher.final()]), 'snapshot')).toString('utf8');
 }
 
 export function encodeRecoveryKey(masterHex: string): string {

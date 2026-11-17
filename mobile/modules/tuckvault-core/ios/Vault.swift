@@ -181,7 +181,10 @@ public enum Vault {
     } catch {
       throw IntegrityError("blob \(short)… failed authentication (wrong key?)")
     }
-    return header[4] == 1 ? try zInflate(body, what: "blob \(short)…") : body
+    if header[4] == 1 {
+      return try zInflate(body, what: "blob \(short)…")
+    }
+    return body
   }
 
   // MARK: manifests

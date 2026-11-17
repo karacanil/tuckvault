@@ -77,14 +77,18 @@ const KEY_SECRET = 'tuckvault.secret';
 const SECURE = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY };
 
 function readJson<T>(name: string, fallback: T): T {
-  try {
-    const file = new File(dataDir(), name);
-    if (!file.exists) return fallback;
-    const parsed = JSON.parse(file.textSync());
-    return parsed && typeof parsed === 'object' ? parsed : fallback;
-  } catch {
-    return fallback;
+  // The freshly written copy is only there if a save was interrupted before it took the real file's place.
+  for (const candidate of [name, name + '.new']) {
+    try {
+      const file = new File(dataDir(), candidate);
+      if (!file.exists) continue;
+      const parsed = JSON.parse(file.textSync());
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch {
+      // unreadable: try the other one
+    }
   }
+  return fallback;
 }
 
 function writeJson(name: string, value: unknown): void {
@@ -94,9 +98,7 @@ function writeJson(name: string, value: unknown): void {
   if (tmp.exists) tmp.delete();
   tmp.create();
   tmp.writeSync(JSON.stringify(value));
-  const target = new File(dir, name);
-  if (target.exists) target.delete();
-  tmp.moveSync(target);
+  tmp.moveSync(new File(dir, name), { overwrite: true });
 }
 
 // -- settings and state, observable from the screens -------------------------

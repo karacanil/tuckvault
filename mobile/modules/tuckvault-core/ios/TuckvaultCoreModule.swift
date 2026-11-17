@@ -74,25 +74,38 @@ public class TuckvaultCoreModule: Module {
 
     AsyncFunction("listTree") { (uri: String) -> [[String: Any?]] in
       try guarded {
-        let root = try fileURL(uri).standardizedFileURL
+        // Symbolic links are resolved on both sides (/var is /private/var on iOS), or no file
+        // would be recognised as lying inside the folder.
+        let root = try fileURL(uri).resolvingSymlinksInPath()
         return try scoped(root) {
           var out = [[String: Any?]]()
           let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
-          guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys, options: []) else {
+          var listingError: Error?
+          guard let walker = FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: keys, options: [],
+            errorHandler: { _, error in
+              listingError = error  // a subfolder that cannot be listed must not look empty
+              return false
+            }) else {
             throw failure("ERR_NOT_FOUND", "\(root.lastPathComponent) is gone")
           }
           let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
           for case let url as URL in walker {
             guard let values = try? url.resourceValues(forKeys: Set(keys)),
                   values.isRegularFile == true, values.isSymbolicLink != true else { continue }
-            let path = url.standardizedFileURL.path
-            guard path.hasPrefix(prefix) else { continue }
+            let path = url.resolvingSymlinksInPath().path
+            guard path.hasPrefix(prefix) else {
+              throw failure("ERR_IO", "A file in the folder could not be placed: " + url.lastPathComponent)
+            }
             out.append([
               "uri": url.absoluteString,
               "path": String(path.dropFirst(prefix.count)),
               "size": Double(values.fileSize ?? 0),
               "mtime": values.contentModificationDate.map { ($0.timeIntervalSince1970 * 1000).rounded() }
             ])
+          }
+          if let listingError {
+            throw failure("ERR_IO", "The folder could not be listed: " + listingError.localizedDescription)
           }
           return out
         }
@@ -102,7 +115,7 @@ public class TuckvaultCoreModule: Module {
     // Read up to `length` bytes at `offset`, encrypt them and write the blob to `outPath`.
     AsyncFunction("sealChunk") { (master: String, uri: String, offset: Double, length: Int, outPath: String) -> [String: Any?] in
       try guarded {
-        let master = try key(master)
+        let masterKey = try key(master)
         let url = try fileURL(uri)
         let data: Data = try scoped(url) {
           let handle = try FileHandle(forReadingFrom: url)
@@ -118,7 +131,7 @@ public class TuckvaultCoreModule: Module {
         if data.isEmpty {
           return ["read": 0, "name": nil, "size": 0]
         }
-        let sealed = try Vault.sealChunk(master: master, data: data)
+        let sealed = try Vault.sealChunk(master: masterKey, data: data)
         try sealed.blob.write(to: try fileURL(outPath))
         return ["read": data.count, "name": sealed.name, "size": sealed.blob.count]
       }

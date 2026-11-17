@@ -57,7 +57,8 @@ can be reached (and, by default, only on Wi-Fi).
 | Files | Any folders you choose | Whatever you put in the **Tuckvault** folder in the Files app (On My iPhone) |
 
 Each backup is a complete picture of those things at that moment. Later
-backups only send what is new or changed. By default the newest 30 backups are
+backups only send what is new or changed, and when nothing changed no new
+backup is written at all. By default the newest 30 backups are
 kept, so a photo you delete from the phone stays restorable until 30 newer
 backups exist; you can also keep everything.
 
@@ -103,8 +104,12 @@ See [SECURITY.md](../SECURITY.md) for the limits.
 - **Photos kept only in iCloud** are fetched from iCloud when they are backed up,
   which needs a connection and can be slow.
 - Restoring a photo that is still on the phone makes a second copy of it.
-- One vault per recovery key: two phones that share a recovery key share their
-  backups, and each one's "newest 30" count includes the other's.
+- Two phones that share a recovery key share one set of backups. Each phone's
+  "newest 30" is counted on its own, so they never push out each other's, but
+  data nothing refers to is only cleaned up once the other phone has been
+  quiet for two weeks.
+- If you allow access to selected photos only, those are backed up as their
+  own item ("Photos (selected)") and never replace backups of the whole library.
 
 ## iPhone
 

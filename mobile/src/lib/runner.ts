@@ -140,9 +140,7 @@ export async function startBackup(background = false): Promise<Result | null> {
       result.warnings = [...found.warnings, ...result.warnings].slice(0, 50);
       if (result.status === 'success') result.status = 'warning';
     }
-    if (result.status === 'success' || result.status === 'warning') {
-      if (scrubDue && !(background && RN.OS === 'ios')) updateState({ lastScrub: result.finished });
-    }
+    if (result.scrubbed) updateState({ lastScrub: result.finished });
   } catch (e) {
     result = failed('backup', e);
   } finally {

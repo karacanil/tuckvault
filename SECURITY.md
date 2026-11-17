@@ -72,6 +72,10 @@ be switched off on the Security tab. Scheduled backups never do it.
   watches the one pairing exchange, or who holds a paired phone's secret, can
   delete that phone's backups or fill the disk. They still cannot read them.
   Remove a lost phone in the Phones tab.
+- A signed request stays valid for a few minutes, so someone who can record
+  the traffic could send the same request again in that time. Inside
+  Tailscale nobody can record it; do not run `tuckvault serve --listen` on an
+  address outside Tailscale.
 - On the phone the key and the pairing secret are kept in the system's secure
   storage (Android Keystore, iOS Keychain), readable only by the app, and are
   left out of device backups and transfers.
