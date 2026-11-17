@@ -46,6 +46,11 @@ def cache_file() -> Path:
     return app_dir() / "cache.json"
 
 
+def phones_file() -> Path:
+    """Paired phones and the settings of `tuckvault serve`."""
+    return app_dir() / "phones.json"
+
+
 def key_file() -> Path:
     return app_dir() / "key.bin"
 

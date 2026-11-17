@@ -48,6 +48,16 @@ def main(argv=None) -> int:
     sub.add_parser("test", help="test the connection to the backup machine")
     sub.add_parser("watch", help="notify if automatic backups have stopped happening "
                                  "(started daily by Windows)")
+    serve = sub.add_parser("serve", help="accept backups from phones running the Tuckvault app")
+    serve.add_argument("--listen", metavar="ADDRESS",
+                       help="listen on this address only (default: this computer itself and its "
+                            "Tailscale address)")
+    serve.add_argument("--port", type=int, help="port to listen on (default: 8743)")
+    phone = sub.add_parser("phone", help="pair phones and manage their backups")
+    phone.add_argument("action", choices=["pair", "list", "remove", "enable", "disable", "status",
+                                          "vaults", "restore"])
+    phone.add_argument("value", nargs="?", help="remove: the phone's id. restore: folder to restore into")
+    phone.add_argument("--snapshot", default="latest", help="restore: backup name (default: latest)")
     args = parser.parse_args(argv)
 
     if args.cmd in (None, "gui"):
@@ -71,6 +81,10 @@ def main(argv=None) -> int:
                           + " Open Tuckvault to see what is wrong.")
         _out(watch.describe(late) or "Automatic backups are up to date.")
         return 1 if late else 0
+
+    if args.cmd in ("serve", "phone"):
+        from . import phones
+        return phones.command(args, cfg, _out)
 
     if args.cmd == "run":
         if args.scheduled and args.only is None:

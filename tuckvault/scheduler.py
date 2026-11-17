@@ -183,16 +183,23 @@ def task_xml(schedule: dict, group_id: str = config.DEFAULT_GROUP) -> str:
 
 
 def _task_xml(schedule, command, arguments, workdir, catch_up=True,
-              description="Tuckvault automatic backup. Managed by the Tuckvault app.") -> str:
+              description="Tuckvault automatic backup. Managed by the Tuckvault app.",
+              at_logon=False) -> str:
     user = os.environ.get("USERNAME", "")
     domain = os.environ.get("USERDOMAIN", "")
     user_id = f"{domain}\\{user}" if domain else user
+    if at_logon:  # a service that stays running: started at sign-in, restarted if it stops
+        triggers = f"<LogonTrigger><Enabled>true</Enabled><UserId>{escape(user_id)}</UserId></LogonTrigger>"
+        limit = ("PT0S</ExecutionTimeLimit>\n    <RestartOnFailure><Interval>PT1M</Interval>"
+                 "<Count>30</Count></RestartOnFailure>")
+    else:
+        triggers, limit = _trigger_xml(schedule), "PT12H</ExecutionTimeLimit>"
     return f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>{escape(description)}</Description>
   </RegistrationInfo>
-  <Triggers>{_trigger_xml(schedule)}</Triggers>
+  <Triggers>{triggers}</Triggers>
   <Principals>
     <Principal id="Author">
       <UserId>{escape(user_id)}</UserId>
@@ -209,7 +216,7 @@ def _task_xml(schedule, command, arguments, workdir, catch_up=True,
     <AllowStartOnDemand>true</AllowStartOnDemand>
     <Enabled>true</Enabled>
     <Hidden>false</Hidden>
-    <ExecutionTimeLimit>PT12H</ExecutionTimeLimit>
+    <ExecutionTimeLimit>{limit}
     <Priority>7</Priority>
   </Settings>
   <Actions Context="Author">
@@ -461,3 +468,89 @@ def apply(cfg: dict) -> None:
         if res.returncode != 0:
             raise OSError("Windows refused to schedule the backup: " + (res.stderr or res.stdout).strip())
     watch.note_schedules(cfg)
+
+
+# -- the service that accepts backups from phones ------------------------------
+
+def phones_task() -> str:
+    """Name of the task (on Linux, the unit) that keeps `tuckvault serve` running."""
+    name = task_name()
+    return name[:-len("Backup")] + "Phones" if name.endswith("Backup") else name + ".Phones"
+
+
+def phones_xml() -> str:
+    command, prefix, workdir = _program()
+    return _task_xml(None, command, prefix + "serve", workdir, at_logon=True,
+                     description="Tuckvault: accepts backups from your phones. Managed by the Tuckvault app.")
+
+
+def phones_unit() -> str:
+    command, prefix, workdir = _program()
+    env = ""
+    if os.environ.get("TUCKVAULT_HOME"):
+        env = "Environment=" + _sd_quote("TUCKVAULT_HOME=" + os.environ["TUCKVAULT_HOME"], False) + "\n"
+    return ("[Unit]\n"
+            "Description=Tuckvault: accepts backups from your phones. Managed by the Tuckvault app.\n\n"
+            "[Service]\n"
+            f"WorkingDirectory={_sd_check(workdir)}\n"
+            f"{env}"
+            "ExecStart=" + " ".join(_sd_quote(a) for a in [command] + prefix.split() + ["serve"]) + "\n"
+            "Restart=on-failure\n"
+            "RestartSec=30\n\n"
+            "[Install]\n"
+            "WantedBy=default.target\n")
+
+
+def phones_enabled() -> bool:
+    """True if this computer starts accepting phone backups by itself."""
+    if _LINUX:
+        return (unit_dir() / (unit_for(phones_task()) + ".service")).exists()
+    if sys.platform != "win32":
+        return False
+    return _schtasks("/Query", "/TN", phones_task()).returncode == 0
+
+
+def phones_enable() -> None:
+    """Keep `tuckvault serve` running: now, and from every sign-in on."""
+    if _LINUX:
+        unit = unit_for(phones_task()) + ".service"
+        _check_systemd()
+        _write(unit_dir() / unit, phones_unit())
+        res = _systemctl("daemon-reload")
+        if res.returncode == 0:
+            res = _systemctl("enable", unit)
+        if res.returncode == 0:
+            res = _systemctl("restart", unit)
+        if res.returncode != 0:
+            raise OSError("systemd refused to start the phone service: " + (res.stderr or res.stdout).strip())
+        return
+    if sys.platform != "win32":
+        raise OSError("Starting automatically is only implemented for Windows and Linux.")
+    fd, tmp = tempfile.mkstemp(suffix=".xml")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-16") as f:
+            f.write(phones_xml())
+        res = _schtasks("/Create", "/TN", phones_task(), "/XML", tmp, "/F")
+    finally:
+        os.remove(tmp)
+    if res.returncode != 0:
+        raise OSError("Windows refused to set up the phone service: " + (res.stderr or res.stdout).strip())
+    _schtasks("/End", "/TN", phones_task())
+    res = _schtasks("/Run", "/TN", phones_task())
+    if res.returncode != 0:
+        raise OSError("Windows could not start the phone service: " + (res.stderr or res.stdout).strip())
+
+
+def phones_disable() -> None:
+    if _LINUX:
+        unit = unit_for(phones_task()) + ".service"
+        _systemctl("disable", "--now", unit)
+        try:
+            os.remove(unit_dir() / unit)
+        except FileNotFoundError:
+            pass
+        _systemctl("daemon-reload")
+        return
+    if sys.platform == "win32" and phones_enabled():
+        _schtasks("/End", "/TN", phones_task())
+        _delete(phones_task())
