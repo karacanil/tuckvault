@@ -44,12 +44,18 @@ def log(text):
 class Pc:
     """The PC side: a throwaway Tuckvault profile storing into a temp folder."""
 
-    def __init__(self, work: Path):
+    def __init__(self, work: Path, ssh: str = None):
         self.work = work
         self.home = work / "home"
         self.home.mkdir(parents=True)
-        (self.home / "config.json").write_text(json.dumps(
-            {"destination": {"type": "local", "folder": str(work / "repo")}}), encoding="utf-8")
+        # ssh: "host:folder" stores on another computer instead, the way a real setup may
+        if ssh:
+            host, _, folder = ssh.partition(":")
+            destination = {"type": "ssh", "host": host, "path": folder}
+        else:
+            destination = {"type": "local", "folder": str(work / "repo")}
+        self.local = not ssh
+        (self.home / "config.json").write_text(json.dumps({"destination": destination}), encoding="utf-8")
         self.env = dict(os.environ, TUCKVAULT_HOME=str(self.home), TUCKVAULT_SERVE_IDLE="2", PYTHONUNBUFFERED="1")
         self.proc = None
 
@@ -139,13 +145,16 @@ def main():
     ap.add_argument("--apk", required=True)
     ap.add_argument("--serial")
     ap.add_argument("--shots", help="folder to save screenshots into")
+    ap.add_argument("--ssh", metavar="HOST:FOLDER",
+                    help="store on another computer over SSH instead of a temp folder; the phone "
+                         "backups then land in FOLDER-phones there")
     args = ap.parse_args()
 
     d = Device(args.serial)
     work = Path(tempfile.mkdtemp(prefix="tuckvault-e2e-"))
     shots = Path(args.shots) if args.shots else work / "shots"
     shots.mkdir(parents=True, exist_ok=True)
-    pc = Pc(work)
+    pc = Pc(work, args.ssh)
 
     def shot(name):
         d.screenshot(str(shots / (name + ".png")))
@@ -202,6 +211,14 @@ def main():
         d.tap("toggle-photos")
         allow_system_dialog(d)
         time.sleep(1)
+        log("setup: add a folder with Android's folder picker")
+        d.scroll_to("add-folder")
+        d.tap("add-folder")
+        d.tap(text="Documents", timeout=20)
+        d.tap(text="TuckvaultNotes")
+        d.tap(text="USE THIS FOLDER")
+        d.tap(text="ALLOW")
+        d.wait_for(text="TuckvaultNotes", timeout=20)
         shot("04-choose")
         d.scroll_to("finish-setup")
         d.tap("finish-setup")
@@ -223,16 +240,20 @@ def main():
         out1 = work / "restored-1"
         pc.restore(recovery_key, out1)
         restored = {p.name: p for p in out1.rglob("*") if p.is_file()}
-        for name in first:
+        for name in first + ["notes.txt"]:
             assert name in restored, "missing in the backup: %s (has %s)" % (name, sorted(restored))
             assert sha(restored[name]) == sha(media / name), name + " differs from what was put on the phone"
         from PIL import Image
         gps = Image.open(restored["TVTEST_0001.jpg"]).getexif().get_ifd(0x8825)
         assert gps.get(1) == "N", "the photo's location did not survive the backup: %r" % dict(gps)
-        blobs = b"".join(p.read_bytes() for p in (work / "repo-phones").rglob("*")
-                         if p.is_file() and p.parent.parent.name == "blobs")
-        assert b"Tuckvault test" not in blobs and b"TVTEST" not in blobs, "plain data found in what is stored"
-        log("  restored %d files, all identical; location kept; nothing readable stored" % len(first))
+        if pc.local:
+            blobs = b"".join(p.read_bytes() for p in (work / "repo-phones").rglob("*")
+                             if p.is_file() and p.parent.parent.name == "blobs")
+            assert b"Tuckvault test" not in blobs and b"TVTEST" not in blobs and "gizli".encode() not in blobs, "plain data found"
+        notes = restored["notes.txt"].relative_to(out1).as_posix()
+        assert notes == "Files/TuckvaultNotes/notes.txt", notes
+        log("  restored %d files (photos, a video, a file from a chosen folder), all identical; location kept%s" % (
+            len(first) + 1, "; nothing readable stored" if pc.local else ""))
 
         # -- second backup: only what is new --------------------------------
         log("second backup after one new photo")
@@ -306,9 +327,7 @@ def main():
         time.sleep(2)
         # WorkManager's job for this app, e.g. "JOB androidx.work.systemjobscheduler:u0a216/0: ..." (newer
         # Android, with a namespace) or "JOB #u0a216/0: ..." (older).
-        found = re.findall(r"JOB (?:(S+):)?#?uw+/(d+): S+ [^
-]*" + re.escape(PACKAGE) + r"/androidx.work[^
-]*SystemJobService",
+        found = re.findall(r"JOB (?:(\S+):)?#?u\w+/(\d+): \S+ .*" + re.escape(PACKAGE) + r"/androidx\.work.*SystemJobService",
                            d.shell("dumpsys jobscheduler"))
         assert found, "the automatic backup is not scheduled with the system"
         for namespace, job in found:

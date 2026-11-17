@@ -66,7 +66,9 @@ export function describe(result: Result, background: boolean, failures: number):
   if (result.kind !== 'backup') return null;
   if (result.status === 'success' || result.status === 'warning') {
     if (!settings.notifyFinished || !result.newFiles) return null; // nothing new: nothing to say
-    const text = plural(result.newFiles, 'new file') + ' safely stored (' + humanSize(result.uploadedBytes) + ' sent).' +
+    // Nothing sent means the content was already stored (a copy of something backed up before).
+    const text = plural(result.newFiles, 'new file') + ' safely stored' +
+      (result.uploadedBytes ? ' (' + humanSize(result.uploadedBytes) + ' sent).' : '.') +
       (result.warnings.length ? ' ' + plural(result.warnings.length, 'file') + ' could not be read.' : '');
     return ['Backup finished', text];
   }

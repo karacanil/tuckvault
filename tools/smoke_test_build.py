@@ -90,6 +90,23 @@ def main() -> int:
         r = run(cli, "schedule", "status")
         check("schedule status", r.returncode == 0, r.stdout + r.stderr)
 
+        # the service phones back up to: started by the window program, as the sign-in task does
+        port = 20000 + os.getpid() % 20000
+        (home / "phones.json").write_text(json.dumps({"port": port}), encoding="utf-8")
+        service = subprocess.Popen([str(gui), "serve", "--listen", "127.0.0.1"], env=env)
+        try:
+            for _ in range(60):
+                r = run(cli, "phone", "status")
+                if "Accepting backups from phones: yes" in r.stdout:
+                    break
+                time.sleep(0.5)
+            check("phone service starts", "Accepting backups from phones: yes" in r.stdout, r.stdout + r.stderr)
+            r = run(cli, "phone", "pair")
+            check("phone pairing code", r.returncode == 0 and "Code:" in r.stdout, r.stdout + r.stderr)
+        finally:
+            service.terminate()
+            service.wait(timeout=20)
+
         if ssh_host:
             repo = f"tuckvault-smoke-{os.getpid()}"
             write_config({"type": "ssh", "host": ssh_host, "path": repo})

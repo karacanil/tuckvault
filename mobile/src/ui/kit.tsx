@@ -26,11 +26,13 @@ export function Screen({ children, scroll = true, footer, padTop = false }: {
 }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const pad = { paddingHorizontal: space.lg, paddingTop: (padTop ? insets.top : 0) + space.lg,
+  const pad = { paddingHorizontal: space.lg, paddingTop: space.lg,
                 paddingBottom: space.xl + (footer ? 0 : insets.bottom) };
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <Bar />
+      {/* a fixed strip, so scrolled content never shows through the status bar */}
+      {padTop ? <View style={{ height: insets.top, backgroundColor: t.bg }} /> : null}
       {scroll ? (
         <ScrollView contentContainerStyle={pad} keyboardShouldPersistTaps="handled">{children}</ScrollView>
       ) : (

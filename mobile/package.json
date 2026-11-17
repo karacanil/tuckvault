@@ -45,7 +45,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test",
-    "test": "node --test --experimental-strip-types --disable-warning=ExperimentalWarning test/vectors.test.ts test/engine.test.ts"
+    "test": "node --test --experimental-strip-types --disable-warning=ExperimentalWarning test/vectors.test.ts test/naming.test.ts test/engine.test.ts"
   },
   "private": true
 }
