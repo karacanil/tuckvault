@@ -73,7 +73,9 @@ async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
       const video = asset.mediaType === MediaType.VIDEO;
       if (!video && asset.mediaType !== MediaType.IMAGE) continue;
       if (video && !settings.videos) continue;
-      const created = toMs(asset.creationTime);
+      const changed = toMs(asset.modificationTime);
+      // Pictures that were copied onto the phone often carry no "taken" time; file them by their file time.
+      const created = toMs(asset.creationTime) || changed;
       const id = asset.id;
       out.items.push({
         key: 'photo:' + id,
@@ -82,7 +84,7 @@ async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
         // Android names a photo by an address the native code can read directly; on iOS it has to be asked for.
         uri: RN.OS === 'android' ? id : () => new Asset(id).getUri(),
         size: null,
-        mtime: toMs(asset.modificationTime) || created,
+        mtime: changed || created,
       });
       if (video) out.videos += 1;
       else out.photos += 1;

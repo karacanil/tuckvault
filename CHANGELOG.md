@@ -1,5 +1,29 @@
 # Changelog
 
+The phone app has its own version numbers and notes: see
+[mobile/CHANGELOG.md](mobile/CHANGELOG.md).
+
+## 1.5.0
+
+**New**
+
+- Backups from phones. The new Tuckvault app for Android and iPhone (see
+  [mobile/README.md](mobile/README.md)) backs up photos, videos and files to
+  this computer over Tailscale. The Phones tab switches it on, pairs a phone
+  with a one-time code, lists paired phones and restores a phone's backup
+  onto this computer. The same from the command line: `tuckvault serve`,
+  `tuckvault phone pair|list|remove|enable|disable|status|restore`.
+- Each phone encrypts its own backups with its own key, in the same format as
+  the PC's. They are stored next to the PC's backups (in
+  `<destination>-phones`), on a folder or on another computer over SSH, and
+  this computer cannot read them.
+
+**Security**
+
+- The phone service listens only on this computer itself and on its
+  Tailscale address. Requests from a phone are signed with the secret agreed
+  at pairing; unpaired callers are turned away before any upload is read.
+
 ## 1.4.0
 
 **New**

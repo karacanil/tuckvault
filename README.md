@@ -19,6 +19,14 @@ You hear from it only when a backup fails.
 <img src="docs/screenshot-restore.png" width="420" alt="The Restore tab">
 </p>
 
+## Phones
+
+The Tuckvault app for Android and iPhone backs up photos, videos and files to
+a computer running Tuckvault, over [Tailscale](https://tailscale.com). The
+phone encrypts everything itself, so the computer only stores unreadable data.
+Switch it on in the **Phones** tab, pair the phone with the code shown there,
+and see [mobile/README.md](mobile/README.md) for the rest.
+
 ## Install
 
 Download from the [latest release](https://github.com/karacanil/tuckvault/releases/latest):
@@ -141,6 +149,11 @@ tuckvault-cli schedule apply|remove|status
 tuckvault-cli key show|import <key>
 tuckvault-cli test                   test the connection
 tuckvault-cli watch                  say whether automatic backups are overdue
+tuckvault-cli phone enable|disable|status   accept backups from phones (see mobile/README.md)
+tuckvault-cli phone pair             show the address and a one-time code for a phone
+tuckvault-cli phone list|remove <id> paired phones
+tuckvault-cli phone restore D:\from-my-phone   restore a phone's backup; asks for its recovery key
+tuckvault-cli serve                  accept phone backups only while this command runs
 ```
 
 ## Run from source

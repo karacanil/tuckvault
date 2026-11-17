@@ -54,7 +54,31 @@ it asks `api.github.com` for the newest release number, at most once a
 day. It sends nothing about you or your files, downloads nothing, and can
 be switched off on the Security tab. Scheduled backups never do it.
 
+## Backups from phones
+
+- A phone's backups are encrypted on the phone with a key that never reaches
+  the computer, in the same format as the PC's own. The computer that
+  receives them, and the machine that stores them, see only unreadable data.
+- The receiving service (`tuckvault serve`) listens on the computer itself
+  and on its Tailscale address only. It speaks plain HTTP: privacy on the way
+  comes from Tailscale, which encrypts everything between its devices.
+- A phone is paired with a one-time code (8 characters, valid ten minutes,
+  five attempts). The reply carries that phone's own secret; afterwards every
+  request is signed with it and the secret is never sent again.
+- What a paired phone can do: store, read and delete data in phone vaults on
+  that computer. It cannot read another vault without that vault's key, and it
+  cannot reach the PC's own backups or files.
+- What this does not protect against: someone on your Tailscale network who
+  watches the one pairing exchange, or who holds a paired phone's secret, can
+  delete that phone's backups or fill the disk. They still cannot read them.
+  Remove a lost phone in the Phones tab.
+- On the phone the key and the pairing secret are kept in the system's secure
+  storage (Android Keystore, iOS Keychain), readable only by the app, and are
+  left out of device backups and transfers.
+
 ## Known limitations
+
+- The phone service has no limit on how much a paired phone may store.
 
 - On Linux the key file on your computer (`~/.config/tuckvault/key.bin`) is
   protected only by its permissions (0600, readable by you alone), not

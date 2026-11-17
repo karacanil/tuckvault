@@ -32,10 +32,10 @@ let tmp: string;
 let home: string;
 let url: string;
 let service: ChildProcess;
-let env: NodeJS.ProcessEnv;
+let env: Record<string, string | undefined>;
 
-function python(args: string[], extra: NodeJS.ProcessEnv = {}) {
-  const run = spawnSync(PYTHON, ['-m', 'tuckvault', ...args], { cwd: REPO, env: { ...env, ...extra }, encoding: 'utf8' });
+function python(args: string[], extra: Record<string, string> = {}) {
+  const run = spawnSync(PYTHON, ['-m', 'tuckvault', ...args], { cwd: REPO, env: { ...env, ...extra } as NodeJS.ProcessEnv, encoding: 'utf8' });
   return { code: run.status, out: (run.stdout || '') + (run.stderr || '') };
 }
 
@@ -58,7 +58,7 @@ before(async () => {
   fs.writeFileSync(path.join(home, 'phones.json'), JSON.stringify({ port }));
   env = { ...process.env, TUCKVAULT_HOME: home, TUCKVAULT_SERVE_IDLE: '1', PYTHONUNBUFFERED: '1' };
   service = spawn(PYTHON, ['-m', 'tuckvault', 'serve', '--listen', '127.0.0.1', '--port', String(port)],
-    { cwd: REPO, env, stdio: 'ignore' });
+    { cwd: REPO, env: env as NodeJS.ProcessEnv, stdio: 'ignore' });
   url = 'http://127.0.0.1:' + port;
   const probe = nodePlatform(path.join(tmp, 'probe'));
   for (let i = 0; ; i++) {

@@ -22,6 +22,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -303,14 +304,15 @@ def main():
         push_media(d, media, ["TVTEST_0001.jpg"], where="/sdcard/Pictures/TuckvaultTest2")
         d.shell("input keyevent 3")  # home: the app is in the background now
         time.sleep(2)
-        jobs = d.shell("dumpsys jobscheduler")
-        ids = []
-        for block in jobs.split("JOB #")[1:]:
-            if PACKAGE in block.split("\n", 1)[0] and "SystemJobService" in block:
-                ids.append(block.split("/", 1)[1].split(":", 1)[0].strip())
-        assert ids, "the automatic backup is not scheduled with the system"
-        for job in ids:
-            d.shell("cmd jobscheduler run -f %s %s" % (PACKAGE, job), check=False)
+        # WorkManager's job for this app, e.g. "JOB androidx.work.systemjobscheduler:u0a216/0: ..." (newer
+        # Android, with a namespace) or "JOB #u0a216/0: ..." (older).
+        found = re.findall(r"JOB (?:(S+):)?#?uw+/(d+): S+ [^
+]*" + re.escape(PACKAGE) + r"/androidx.work[^
+]*SystemJobService",
+                           d.shell("dumpsys jobscheduler"))
+        assert found, "the automatic backup is not scheduled with the system"
+        for namespace, job in found:
+            d.shell("cmd jobscheduler run -f %s%s %s" % ("-n %s " % namespace if namespace else "", PACKAGE, job), check=False)
         deadline = time.time() + 180
         while "Backup finished" not in d.shell("dumpsys notification --noredact"):
             assert time.time() < deadline, "no notification after the background backup"
