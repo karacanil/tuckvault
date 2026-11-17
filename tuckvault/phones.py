@@ -30,7 +30,7 @@ def status_lines(cfg: dict) -> list:
     return lines
 
 
-def restore(cfg: dict, dest: str, recovery_key: str, snapshot: str = "latest") -> dict:
+def restore(cfg: dict, dest: str, recovery_key: str, snapshot: str = "latest", progress=None) -> dict:
     """Restore a phone's backup into a folder on this computer, with that phone's recovery key."""
     master = crypto.decode_recovery_key(recovery_key)  # raises ValueError with a readable message
     vault = crypto.Keys(master).check[:24]
@@ -49,7 +49,7 @@ def restore(cfg: dict, dest: str, recovery_key: str, snapshot: str = "latest") -
         if not snaps:
             raise engine.BackupError("There are no readable backups from that phone.")
         snapshot = snaps[0]["name"]
-    return engine.run_restore(snapshot, dest, phone_cfg)
+    return engine.run_restore(snapshot, dest, phone_cfg, progress=progress)
 
 
 def command(args, cfg: dict, out) -> int:
