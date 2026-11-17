@@ -26,7 +26,12 @@ export default function Connect() {
       }
       const computer = await hello(device, url);
       const server = await pair(device, url, code, name.trim() || 'Phone', Platform.OS);
-      setPairingSecret(server.secret);
+      try {
+        setPairingSecret(server.secret);
+      } catch {
+        throw new BackupError('secure_storage', 'This phone could not keep the connection in its secure storage, ' +
+          'so it is not connected. Restart the phone and try again with a new code.');
+      }
       updateSettings({ server: { url, device: server.device, name: server.name || computer.name },
                        deviceName: name.trim() || 'Phone' });
       router.replace(nextSetupStep());

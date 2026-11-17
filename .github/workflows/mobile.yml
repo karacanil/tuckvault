@@ -133,13 +133,15 @@ jobs:
           UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k in sorted(d, reverse=True) if 'iOS' in k for x in d[k] if x['name'].startswith('iPhone')))")
           echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl list devices available | grep "$UDID"
+      # Signed "to run locally" (no account needed): without any signature the simulator
+      # refuses the app access to the keychain, where the backup key is kept.
       - name: Build the app for the simulator
         working-directory: mobile/ios
         run: |
           set -o pipefail
           xcodebuild -workspace Tuckvault.xcworkspace -scheme Tuckvault -configuration Release \
             -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO build | tail -n 60
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO COMPILER_INDEX_STORE_ENABLE=NO build | tail -n 60
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
