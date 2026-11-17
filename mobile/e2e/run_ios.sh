@@ -40,7 +40,18 @@ CODE=$("$PY" -m tuckvault phone pair | awk '/Code:/ {print $2}')
 test -n "$CODE"
 
 echo "[e2e] the app: setup, backup, restore on the phone"
-(cd "$SHOTS" && maestro --device "$SIM_UDID" test -e CODE="$CODE" "$REPO/mobile/e2e/ios-flow.yaml")
+# If the flow stops, keep what explains it: the screen, what Maestro saw, the app's own log, the PC's log.
+explain() {
+  xcrun simctl io "$SIM_UDID" screenshot "$SHOTS/ios-failure.png" || true
+  cp -R "$HOME/.maestro/tests" "$SHOTS/maestro-debug" 2>/dev/null || true
+  xcrun simctl spawn "$SIM_UDID" log show --last 6m --style compact \
+    --predicate 'process == "Tuckvault"' > "$SHOTS/app-log.txt" 2>&1 || true
+  cp "$WORK/serve.log" "$SHOTS/serve-log.txt" 2>/dev/null || true
+  cp "$TUCKVAULT_HOME/tuckvault.log" "$SHOTS/tuckvault-log.txt" 2>/dev/null || true
+  echo "[e2e] the flow stopped; the last lines of the app's log:"
+  grep -iE "error|exception|fatal|tuckvault" "$SHOTS/app-log.txt" | tail -40 || true
+}
+(cd "$SHOTS" && maestro --device "$SIM_UDID" test -e CODE="$CODE" "$REPO/mobile/e2e/ios-flow.yaml") || { explain; exit 1; }
 
 echo "[e2e] the PC restores the phone's backup with the recovery key the app showed"
 KEY=$(xcrun simctl pbpaste "$SIM_UDID")

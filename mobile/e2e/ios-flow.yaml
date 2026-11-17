@@ -22,6 +22,7 @@ appId: io.github.karacanil.tuckvault
     id: "code"
 - inputText: ${CODE}
 - tapOn: "On your computer"
+- takeScreenshot: ios-01b-before-connect
 - tapOn:
     id: "connect"
 

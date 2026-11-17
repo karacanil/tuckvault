@@ -22,6 +22,17 @@ is sent, in the same format the PC program uses, and travels over your private
   [mobile release](https://github.com/karacanil/tuckvault/releases). For iPhone
   see [iPhone](#iphone) below.
 
+To install the APK, open it on the phone and allow your browser or file app to
+install apps when Android asks. Every release is signed with the same key;
+its certificate's SHA-256 is
+
+```
+e418fa07645b33f956f34200d4cab18d29d84c6722975ae78b69a907138a97c3
+```
+
+and `apksigner verify --print-certs <apk>` shows it, if you want to check that
+a download is genuine.
+
 ## Setting it up
 
 On the computer:
