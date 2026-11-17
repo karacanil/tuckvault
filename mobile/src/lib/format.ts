@@ -50,3 +50,11 @@ export function baseName(path: string): string {
   const i = path.lastIndexOf('/');
   return i < 0 ? path : path.slice(i + 1);
 }
+
+/** "Backup finished, 2 hours ago" for a run's result. */
+export function describeRun(r: { kind: string; status: string; finished: string }): string {
+  const what = r.kind === 'verify' ? 'Check' : r.kind === 'restore' ? 'Restore' : 'Backup';
+  const how: Record<string, string> = { success: 'finished', warning: 'finished with skipped files', failed: 'did not work',
+                                        partial: 'not finished', cancelled: 'stopped' };
+  return what + ' ' + (how[r.status] || r.status) + ', ' + ago(r.finished);
+}
