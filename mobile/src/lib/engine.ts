@@ -393,7 +393,8 @@ async function backup(o: BackupOptions, result: Result, keep: (c: Cache) => void
   // If the newest backup of this phone already holds exactly this, there is nothing to add.
   // Automatic runs happen several times a day; without this they would push real history
   // out of the "newest N" within days.
-  if (!result.newFiles && !warnings.length) {
+  // (A file that can never be read is a warning every time; that alone must not count as a change.)
+  if (!result.newFiles) {
     const same = await unchangedSince(o, entries);
     if (same) {
       result.snapshot = same;

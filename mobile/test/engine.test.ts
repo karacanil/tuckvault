@@ -325,6 +325,14 @@ test('a file that cannot be read is skipped with a warning', async () => {
   assert.equal(result.status, 'warning');
   assert.equal(result.files, 1);
   assert.match(result.warnings[0], /Photos\/gone\.jpg/);
+
+  // The file stays unreadable. That is reported every time, but it is not a change:
+  // no new backup is written, so history is not used up by repeating the same one.
+  const again = await p.backup({ items });
+  assert.equal(again.status, 'warning');
+  assert.equal(again.unchanged, true);
+  assert.equal(again.snapshot, result.snapshot);
+  assert.equal((await listBackups(p.session)).length, 1);
 });
 
 test('two photos with the same name both get a place', async () => {
