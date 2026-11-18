@@ -36,6 +36,24 @@ export function normalizeAddress(input: string): string {
   return scheme + '://' + host;
 }
 
+export type ScannedPairing = { url: string; host: string; token: string };
+
+/**
+ * What a scanned pairing code carries: the link "…connect?u=<address>&c=<token>" the computer
+ * shows as a square code. Returns null for anything that is not a complete, well-formed one,
+ * so a half-made or tampered link just leaves the ordinary boxes to fill in.
+ */
+export function scannedPairing(u: unknown, c: unknown): ScannedPairing | null {
+  if (typeof u !== 'string' || typeof c !== 'string') return null;
+  if (u.length > 300 || !/^[A-Za-z0-9]{20,64}$/.test(c)) return null;
+  try {
+    const url = normalizeAddress(u);
+    return { url, host: url.replace(/^https?:\/\//, '').replace(/:8743$/, ''), token: c };
+  } catch {
+    return null;
+  }
+}
+
 function parse(reply: HttpReply): any {
   try {
     return JSON.parse(reply.text);

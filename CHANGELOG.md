@@ -3,6 +3,19 @@
 The phone app has its own version numbers and notes: see
 [mobile/CHANGELOG.md](mobile/CHANGELOG.md).
 
+## Unreleased
+
+- Pairing a phone is now one scan. **Pair a phone…** (and `tuckvault phone
+  pair`) shows a square code; pointing the phone's camera at it opens the app
+  with everything filled in, and one tap connects. The address and short code
+  can still be typed. Both now stay valid for 30 minutes instead of 10.
+- The phone is told exactly why a pairing was refused (expired, already used,
+  too many wrong codes, how many tries are left), and refusals are written to
+  the log, never with the code.
+- Wrong short codes no longer cancel the whole pairing, only the short code.
+- `tuckvault phone pair --qr FILE` saves the code as a picture. Drawing the
+  code uses the small `segno` library; without it pairing works by typing.
+
 ## 1.5.0
 
 **New**

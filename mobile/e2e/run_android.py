@@ -95,6 +95,16 @@ class Pc:
         assert code == 0, out
         return next(line.split()[-1] for line in out.splitlines() if "Code:" in line)
 
+    def pairing_link(self, prefix: str, address: str) -> str:
+        """The link inside the code a phone scans, pointed at the address this phone reaches the computer by."""
+        from urllib.parse import parse_qs, urlencode, urlsplit
+        code, out = self.run("phone", "pair", "--show-link", "--link-prefix", prefix,
+                             "--qr", str(self.home / "pair.png"))
+        assert code == 0, out
+        link = next(line.split()[-1] for line in out.splitlines() if "Link:" in line)
+        token = parse_qs(urlsplit(link).query)["c"][0]
+        return prefix + "connect?" + urlencode({"u": address, "c": token})
+
     def restore(self, recovery_key: str, dest: Path):
         code, out = self.run("phone", "restore", str(dest), TUCKVAULT_PHONE_KEY=recovery_key)
         assert code == 0, out
@@ -154,6 +164,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apk")
     ap.add_argument("--expo-go", metavar="URL", help="run the app inside Expo Go from this exp:// address")
+    ap.add_argument("--scan", action="store_true",
+                    help="pair by opening the link of the code the computer shows, as scanning it does, "
+                         "instead of typing the code")
     ap.add_argument("--serial")
     ap.add_argument("--shots", help="folder to save screenshots into")
     ap.add_argument("--address", default="10.0.2.2",
@@ -227,12 +240,23 @@ def main():
         d.wait_for("connect-error")
         assert d.find(contains="That code is not right") is not None, d.texts()
         shot("02-connect-wrong-code")
-        code = pc.pairing_code()
-        d.tap("code")
-        d.shell("input keyevent --longpress 67 67 67 67 67 67 67 67 67 67 67 67")  # clear the box
-        d.type_into("code", code)
-        d.back()
-        d.tap("connect")
+        if args.scan:
+            log("setup: the code on the computer is scanned (its link is opened), nothing is typed")
+            prefix = args.expo_go.rstrip("/") + "/--/" if args.expo_go else "tuckvault://"
+            link = pc.pairing_link(prefix, "http://%s:%d" % (args.address, PORT))
+            d.shell("am start -a android.intent.action.VIEW -d '%s' %s" % (link, adb_ui.PACKAGE))
+            host = d.wait_for("scanned-host", timeout=60)
+            assert args.address in (host.get("text") or ""), host.attrib
+            assert d.find("code") is None, "the boxes to type into should be gone"
+            shot("02b-scanned")
+            d.tap("connect")
+        else:
+            code = pc.pairing_code()
+            d.tap("code")
+            d.shell("input keyevent --longpress 67 67 67 67 67 67 67 67 67 67 67 67")  # clear the box
+            d.type_into("code", code)
+            d.back()
+            d.tap("connect")
 
         log("setup: recovery key")
         key_node = d.wait_for("recovery-key", timeout=30)

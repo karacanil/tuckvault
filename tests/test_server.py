@@ -5,6 +5,7 @@
 
 import copy
 import hashlib
+import io
 import http.client
 import json
 import os
@@ -140,21 +141,71 @@ class Pairing(Base):
         self.assertEqual(self.phone.json("GET", "/v1/whoami")[0], 200)
         other = Phone(self.service.port)
         status, reply = other.pair(code)
+        self.assertEqual((status, reply["error"]), (403, "pairing_used"))
+
+    def test_nothing_started_says_so(self):
+        status, reply = self.phone.pair("AAAA-AAAA")
         self.assertEqual((status, reply["error"]), (403, "no_pairing"))
 
-    def test_wrong_codes_end_the_pairing(self):
+    def test_wrong_codes_end_the_typed_code_and_say_how_many_are_left(self):
         code = server.new_pairing_code()
-        for _ in range(server.PAIR_TRIES):
-            status, _ = self.phone.pair("AAAA-AAAA")
-            self.assertEqual(status, 403)
+        for n in range(server.PAIR_TRIES - 1):
+            status, reply = self.phone.pair("AAAA-AAAA")
+            self.assertEqual((status, reply["error"]), (403, "bad_code"))
+            self.assertIn("%d tr" % (server.PAIR_TRIES - 1 - n), reply["message"])
+        status, reply = self.phone.pair("AAAA-AAAA")
+        self.assertEqual((status, reply["error"]), (403, "pairing_locked"))
         status, reply = self.phone.pair(code)  # the right one is now too late
-        self.assertEqual((status, reply["error"]), (403, "no_pairing"))
+        self.assertEqual((status, reply["error"]), (403, "pairing_locked"))
 
     def test_code_expires(self):
-        code = server.new_pairing_code()
+        pairing = server.new_pairing()
         with mock.patch("time.time", return_value=time.time() + server.PAIR_MINUTES * 60 + 5):
-            status, reply = self.phone.pair(code)
-        self.assertEqual((status, reply["error"]), (403, "no_pairing"))
+            status, reply = self.phone.pair(pairing["code"])
+            self.assertEqual((status, reply["error"]), (403, "pairing_expired"))
+            status, reply = self.phone.pair(pairing["token"])
+            self.assertEqual((status, reply["error"]), (403, "pairing_expired"))
+
+    def test_scanned_token_pairs_once(self):
+        pairing = server.new_pairing()
+        self.assertEqual(len(pairing["token"]), server.TOKEN_LENGTH)
+        status, reply = self.phone.pair(pairing["token"])
+        self.assertEqual(status, 200, reply)
+        self.assertEqual(self.phone.json("GET", "/v1/whoami")[0], 200)
+        for again in (pairing["token"], pairing["code"]):  # one pairing is one phone
+            status, reply = Phone(self.service.port).pair(again)
+            self.assertEqual((status, reply["error"]), (403, "pairing_used"))
+
+    def test_wrong_tokens_and_wrong_codes_do_not_stop_a_scan(self):
+        pairing = server.new_pairing()
+        for _ in range(server.PAIR_TRIES * 3):  # long wrong ones are refused but never counted
+            status, reply = self.phone.pair("B" * server.TOKEN_LENGTH)
+            self.assertEqual((status, reply["error"]), (403, "bad_code"))
+        for _ in range(server.PAIR_TRIES):      # someone guessing the short code locks only the short code
+            self.phone.pair("AAAA-AAAA")
+        self.assertEqual(self.phone.pair(pairing["code"])[1]["error"], "pairing_locked")
+        self.assertEqual(self.phone.pair(pairing["token"])[0], 200)
+
+    def test_new_pairing_cancels_the_one_before(self):
+        first = server.new_pairing()
+        second = server.new_pairing()
+        self.assertEqual(self.phone.pair(first["token"])[1]["error"], "bad_code")
+        self.assertEqual(self.phone.pair(second["token"])[0], 200)
+
+    def test_nothing_usable_is_kept_on_disk(self):
+        pairing = server.new_pairing()
+        with open(paths.phones_file(), encoding="utf-8") as f:
+            kept = f.read()
+        self.assertNotIn(pairing["token"], kept)
+        self.assertNotIn(pairing["code"].replace("-", ""), kept)
+
+    def test_link_carries_address_and_token(self):
+        from urllib.parse import parse_qs, urlsplit
+        link = server.pairing_link("http://pc.tail1234.ts.net:8743", "T" * 32)
+        self.assertTrue(link.startswith("tuckvault://connect?"))
+        self.assertEqual(parse_qs(urlsplit(link).query), {"u": ["http://pc.tail1234.ts.net:8743"], "c": ["T" * 32]})
+        self.assertTrue(server.pairing_link("http://x:1", "T", "exp://100.64.0.1:8093/--/")
+                        .startswith("exp://100.64.0.1:8093/--/connect?u=http%3A%2F%2Fx%3A1&c=T"))
 
     def test_without_pairing_nothing_is_served(self):
         self.phone.device, self.phone.secret = "0" * 12, "00" * 32
@@ -405,11 +456,44 @@ class Settings(Base):
         with mock.patch.object(server, "port", return_value=self.service.port), \
                 mock.patch.object(server, "tailscale_addresses", return_value=["100.101.102.103"]), \
                 mock.patch.object(server, "tailscale_name", return_value="pc.tail1234.ts.net"), \
-                mock.patch.object(scheduler, "phones_enabled", return_value=False):
-            code = phones.command(mock.Mock(cmd="phone", action="pair", value=None), self.cfg, lines.append)
+                mock.patch.object(scheduler, "phones_enabled", return_value=False), \
+                mock.patch("sys.stdout", io.TextIOWrapper(io.BytesIO(), encoding="utf-8")):
+            code = phones.command(mock.Mock(cmd="phone", action="pair", value=None, qr=None, link_prefix=None, show_link=False),
+                                  self.cfg, lines.append)
+            picture = os.path.join(self.tmp, "pair.png")
+            again = []
+            phones.command(mock.Mock(cmd="phone", action="pair", value=None, qr=picture, link_prefix=None, show_link=False),
+                           self.cfg, again.append)
         self.assertEqual(code, 0, lines)
         text = "\n".join(lines)
         self.assertIn("http://pc.tail1234.ts.net:%d" % self.service.port, text)
+        self.assertIn("Scan this", text)        # the code to scan is drawn in the terminal
+        with open(picture, "rb") as f:          # or saved as a picture
+            self.assertEqual(f.read(8), b"\x89PNG\r\n\x1a\n")
+        shown = next(line.split()[-1] for line in lines if "Code:" in line)
+        self.assertEqual(self.phone.pair(shown)[1]["error"], "bad_code")  # the second pairing cancelled the first
+        shown = next(line.split()[-1] for line in again if "Code:" in line)
+        self.assertEqual(self.phone.pair(shown)[0], 200)
+
+    def test_pairing_without_the_drawing_library_still_gives_the_code(self):
+        lines = []
+        with mock.patch.object(server, "port", return_value=self.service.port), \
+                mock.patch.object(server, "tailscale_addresses", return_value=["100.101.102.103"]), \
+                mock.patch.object(server, "tailscale_name", return_value=None), \
+                mock.patch.dict(sys.modules, {"segno": None}):
+            code = phones.command(mock.Mock(cmd="phone", action="pair", value=None, qr=None, link_prefix=None, show_link=False),
+                                  self.cfg, lines.append)
+        self.assertEqual(code, 0, lines)
+        self.assertNotIn("Scan this", "\n".join(lines))
+        lines.clear()
+        with mock.patch.object(server, "port", return_value=self.service.port), \
+                mock.patch.object(server, "tailscale_addresses", return_value=["100.101.102.103"]), \
+                mock.patch.object(server, "tailscale_name", return_value=None), \
+                mock.patch("sys.stdout", io.TextIOWrapper(io.BytesIO(), encoding="cp1252")):  # cannot show blocks
+            code = phones.command(mock.Mock(cmd="phone", action="pair", value=None, qr=None, link_prefix=None, show_link=False),
+                                  self.cfg, lines.append)
+        self.assertEqual(code, 0, lines)
+        self.assertNotIn("Scan this", "\n".join(lines))
         shown = next(line.split()[-1] for line in lines if "Code:" in line)
         self.assertEqual(self.phone.pair(shown)[0], 200)
 

@@ -9,9 +9,10 @@ Tailscale. It is a doorway to the same storage agent the PC backups use:
 * Every phone vault is a normal Tuckvault repository in its own folder
   next to the PC's backups ("<destination>-phones/<vault>"), on a local
   folder or on another computer over SSH.
-* A phone is paired once with a short code shown on this computer. After
-  that every request is signed with the secret agreed at pairing (HMAC),
-  so the secret itself never travels again.
+* A phone is paired once, by scanning a code shown on this computer (a
+  link carrying a long one-time token) or by typing a short one-time code.
+  After that every request is signed with the secret agreed at pairing
+  (HMAC), so the secret itself never travels again.
 
 Standard library only, like the agent.
 """
@@ -29,7 +30,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from . import __version__, config, paths
 from .remote import BLOB_NAME, SNAP_NAME, ConnectError, Remote, RemoteError, clean_text, folder_of
@@ -39,8 +40,10 @@ DEFAULT_PORT = 8743
 MAX_BLOB = 64 * 1024 * 1024      # the storage agent's own limit
 MAX_JSON = 4 * 1024 * 1024
 MAX_SKEW = 15 * 60               # seconds a phone's clock may differ from ours
-PAIR_MINUTES = 10
+PAIR_MINUTES = 30
 PAIR_TRIES = 5
+TOKEN_LENGTH = 32                # characters of the scanned token (about 158 bits)
+APP_LINK = "tuckvault://"        # what opens the phone app
 # seconds before an unused vault connection is released (the environment variable is for tests)
 IDLE_CLOSE = float(os.environ.get("TUCKVAULT_SERVE_IDLE") or 20)
 _ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no I, L, O, 0, 1
@@ -88,39 +91,80 @@ def _code_hash(code: str) -> str:
     return hashlib.sha256(b"tuckvault-pairing/" + clean.encode("ascii", "replace")).hexdigest()
 
 
-def new_pairing_code() -> str:
-    """Start pairing: returns the code to type into the phone (valid for a few minutes, one use)."""
+def new_pairing() -> dict:
+    """Start pairing. Returns {"code", "token", "expires"}: the short code to type, the long
+    token a scanned link carries, and when both stop working. Either works, once."""
     code = "".join(secrets.choice(_ALPHABET) for _ in range(8))
+    token = "".join(secrets.choice(_ALPHABET) for _ in range(TOKEN_LENGTH))
+    expires = time.time() + PAIR_MINUTES * 60
     st = load()
-    st["pairing"] = {"hash": _code_hash(code), "expires": time.time() + PAIR_MINUTES * 60, "tries": 0}
+    st["pairing"] = {"hash": _code_hash(code), "link": _code_hash(token), "expires": expires, "tries": 0}
     save(st)
-    return code[:4] + "-" + code[4:]
+    return {"code": code[:4] + "-" + code[4:], "token": token, "expires": expires}
+
+
+def new_pairing_code() -> str:
+    """Start pairing: returns the code to type into the phone (valid for a while, one use)."""
+    return new_pairing()["code"]
+
+
+def pairing_link(address: str, token: str, prefix: str = APP_LINK) -> str:
+    """The link behind the code a phone scans: it opens the app with the address and token filled in."""
+    return prefix + "connect?" + urlencode({"u": address, "c": token})
+
+
+_ENDED = {
+    "expired": ("pairing_expired", "That code has expired. Start pairing again on the computer and use the new one."),
+    "locked": ("pairing_locked", "Too many wrong codes were entered, so pairing was stopped. "
+                                 "Start it again on the computer."),
+    "used": ("pairing_used", "That code has already been used. Start pairing again on the computer "
+                             "to connect another phone."),
+}
+
+
+def _refuse(error: str, message: str, detail: str = ""):
+    log.warning("pairing refused: %s%s", error, detail)  # never the code itself
+    raise _Reply(403, error, message)
 
 
 def pair(code: str, name: str, platform: str = "") -> dict:
-    """Trade a pairing code for a device id and secret. Raises _Reply."""
+    """Trade a pairing code, typed or scanned, for a device id and secret. Raises _Reply."""
     st = load()
     pending = st.get("pairing")
-    if not isinstance(pending, dict) or time.time() > float(pending.get("expires") or 0):
-        if "pairing" in st:  # only an expired pairing is worth a write; strangers knocking are not
-            st.pop("pairing", None)
-            save(st)
-        raise _Reply(403, "no_pairing", "No pairing is in progress on the computer. "
-                                        "Start it there and use the new code.")
-    if not hmac.compare_digest(str(pending.get("hash")), _code_hash(code)):
-        pending["tries"] = int(pending.get("tries") or 0) + 1
-        if pending["tries"] >= PAIR_TRIES:
-            st.pop("pairing", None)
+    if not isinstance(pending, dict):
+        _refuse("no_pairing", "No pairing is in progress on the computer. Start it there first.")
+    if pending.get("ended") in _ENDED:
+        _refuse(*_ENDED[pending["ended"]])
+    if time.time() > float(pending.get("expires") or 0):
+        st["pairing"] = {"ended": "expired"}  # written once; later knocks change nothing
         save(st)
-        raise _Reply(403, "bad_code", "That code is not right." if "pairing" in st else
-                     "Too many wrong codes. Start pairing again on the computer.")
-    st.pop("pairing", None)
+        _refuse(*_ENDED["expired"])
+    given = _code_hash(code)
+    scanned = sum(c.isalnum() for c in str(code)) >= 20
+    if scanned:
+        # Too long to guess, so wrong ones are not counted: a stranger cannot use them to stop a pairing.
+        if not hmac.compare_digest(str(pending.get("link")), given):
+            _refuse("bad_code", "That pairing code is not the current one. Scan the code now shown on the computer.")
+    elif not pending.get("hash"):
+        _refuse(*_ENDED["locked"])
+    elif not hmac.compare_digest(str(pending.get("hash")), given):
+        pending["tries"] = int(pending.get("tries") or 0) + 1
+        left = PAIR_TRIES - pending["tries"]
+        if left <= 0:
+            pending["hash"] = None  # the typed code is finished; a scanned one still works until it expires
+        save(st)
+        if left <= 0:
+            _refuse(*_ENDED["locked"], detail=" (try %d)" % pending["tries"])
+        _refuse("bad_code", "That code is not right. Check it against the computer and try again (%d %s left)."
+                % (left, "try" if left == 1 else "tries"), detail=" (try %d)" % pending["tries"])
+    st["pairing"] = {"ended": "used"}
     device = secrets.token_hex(6)
     secret = secrets.token_hex(32)
     st["devices"][device] = {"name": clean_text(name or "Phone", 60), "platform": clean_text(platform, 20),
                              "secret": secret, "paired": _now()}
     save(st)
-    log.info("paired phone %s (%s)", device, st["devices"][device]["name"])
+    log.info("paired phone %s (%s) by %s", device, st["devices"][device]["name"],
+             "scanned code" if scanned else "typed code")
     return {"device": device, "secret": secret}
 
 

@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 
-import { BackupError, Client, hello, normalizeAddress, pair } from '../src/lib/client.ts';
+import { BackupError, Client, hello, normalizeAddress, pair, scannedPairing } from '../src/lib/client.ts';
 import type { Server } from '../src/lib/client.ts';
 import { CHUNK, listBackups, manifest, restoreFile, runBackup, runVerify, tuning } from '../src/lib/engine.ts';
 import type { BackupOptions, Cache, Item, Session } from '../src/lib/engine.ts';
@@ -131,9 +131,35 @@ test('addresses typed by hand are understood', () => {
   assert.throws(() => normalizeAddress('http://user@host'), BackupError);
 });
 
+test('a scanned pairing code is understood, and anything else is left alone', () => {
+  const token = 'ABCDEFGHJKMNPQRSTUVWXYZ234567892';
+  assert.deepEqual(scannedPairing('http://pc.tail1234.ts.net:8743', token),
+                   { url: 'http://pc.tail1234.ts.net:8743', host: 'pc.tail1234.ts.net', token });
+  assert.deepEqual(scannedPairing('100.101.102.103:9000', token),
+                   { url: 'http://100.101.102.103:9000', host: '100.101.102.103:9000', token });
+  assert.equal(scannedPairing(undefined, token), null);
+  assert.equal(scannedPairing('http://pc.tail1234.ts.net:8743', undefined), null);
+  assert.equal(scannedPairing(['a', 'b'], token), null);                       // a link with the address twice
+  assert.equal(scannedPairing('http://pc.tail1234.ts.net:8743', 'ABCD-EFGH'), null); // the short code is typed, never scanned
+  assert.equal(scannedPairing('http://pc.tail1234.ts.net:8743', token + '&x=<script>'), null);
+  assert.equal(scannedPairing('http://someone@pc.tail1234.ts.net', token), null);
+  assert.equal(scannedPairing('', token), null);
+  assert.equal(scannedPairing('h'.repeat(301), token), null);
+});
+
+test('a phone pairs with the picture the computer makes, once', async () => {
+  const picture = path.join(tmp, 'pair.png');
+  const shown = python(['phone', 'pair', '--qr', picture]);
+  assert.match(shown.out, /saved as a picture/, shown.out + shown.err);
+  assert.equal(fs.readFileSync(picture).subarray(1, 4).toString(), 'PNG');
+  const token = JSON.parse(fs.readFileSync(path.join(tmp, 'home', 'phones.json'), 'utf8')).pairing;
+  assert.ok(token.link && !('token' in token)); // only a hash of the token is kept on the computer
+});
+
 test('a wrong pairing code and a wrong address are explained', async () => {
   const platform = nodePlatform(path.join(tmp, 'nobody'));
-  await assert.rejects(pair(platform, url, 'AAAA-AAAA', 'x', 'test'), (e: BackupError) => e.code === 'no_pairing' || e.code === 'bad_code');
+  await assert.rejects(pair(platform, url, 'AAAA-AAAA', 'x', 'test'),
+                       (e: BackupError) => ['no_pairing', 'bad_code', 'pairing_used', 'pairing_locked'].includes(e.code));
   await assert.rejects(hello(platform, 'http://127.0.0.1:9'), (e: BackupError) => e.code === 'unreachable');
 });
 

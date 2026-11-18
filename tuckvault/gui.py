@@ -451,14 +451,29 @@ class App(tk.Tk):
                 "Tuckvault", "Tailscale is not running on this computer, so a phone cannot reach it.\n\n"
                 "Start Tailscale, sign in, and try again.", parent=self)
             return
-        code = server.new_pairing_code()
+        from . import qr
+        pairing = server.new_pairing()
+        code = pairing["code"]
         win = tk.Toplevel(self)
         win.title("Pair a phone")
         win.transient(self)
         win.resizable(False, False)
         frame = ttk.Frame(win, padding=PAD * 3)
         frame.pack()
-        ttk.Label(frame, text="In the Tuckvault app on your phone, enter:", justify="left").pack(anchor="w")
+        rows = qr.matrix(server.pairing_link(addresses[0], pairing["token"]))
+        if rows:
+            ttk.Label(frame, text="Scan this with your phone's camera:", justify="left").pack(anchor="w")
+            cell, border = max(3, 264 // (len(rows) + 8)), 4
+            side = (len(rows) + 2 * border) * cell
+            canvas = tk.Canvas(frame, width=side, height=side, background="white", highlightthickness=0)
+            for y, row in enumerate(rows):
+                for x, dark in enumerate(row):
+                    if dark:
+                        canvas.create_rectangle((x + border) * cell, (y + border) * cell, (x + border + 1) * cell,
+                                                (y + border + 1) * cell, fill="black", width=0)
+            canvas.pack(pady=(PAD, PAD * 2))
+        ttk.Label(frame, text=("Or type this into the Tuckvault app on your phone:" if rows else
+                               "In the Tuckvault app on your phone, enter:"), justify="left").pack(anchor="w")
         ttk.Label(frame, text="Address", foreground="#555").pack(anchor="w", pady=(PAD * 2, 0))
         address = ttk.Entry(frame, font=("Consolas", 13), width=max(30, len(addresses[0]) + 2), justify="center")
         address.insert(0, addresses[0])
@@ -469,8 +484,8 @@ class App(tk.Tk):
         shown.insert(0, code)
         shown.configure(state="readonly")
         shown.pack(anchor="w")
-        ttk.Label(frame, text=f"The code works once, for {server.PAIR_MINUTES} minutes. "
-                              "Both devices need Tailscale switched on.",
+        ttk.Label(frame, text=f"Each works once, for {server.PAIR_MINUTES} minutes. "
+                              "Both devices need Tailscale switched on. Do not share a picture of this window.",
                   foreground="#555", wraplength=420, justify="left").pack(anchor="w", pady=(PAD * 2, 0))
 
         def close():

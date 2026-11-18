@@ -40,7 +40,8 @@ On the computer:
 1. Open Tuckvault and go to the **Phones** tab.
 2. Tick **Accept backups from phones**. Windows may ask once whether Python (or
    Tuckvault) may accept connections; allow it for private networks.
-3. Click **Pair a phone…**. It shows an address and a code.
+3. Click **Pair a phone…**. It shows a square code to scan, and below it an
+   address and a short code for typing instead.
 
 Without the window, the same three steps are:
 
@@ -51,8 +52,10 @@ tuckvault phone pair
 
 On the phone:
 
-1. Open Tuckvault and choose **Get started**.
-2. Type the address and the code.
+1. Point the phone's camera at the square code and open the link it offers.
+   Tuckvault opens with the computer's address filled in.
+2. Check that address and tap **Connect to this computer**. (Or choose **Get
+   started** in the app and type the address and the short code.)
 3. Save the **recovery key** it shows. It is the only way to open the backups
    if the phone is lost. Nobody can reset it.
 4. Choose what to back up, then tap **Back up now**.
@@ -151,6 +154,9 @@ your computer:
 2. On the computer, in `mobile/`: `npm ci` once, then `npm run go`. The first
    time it asks you to sign in to Expo; use the same account as in Expo Go.
 3. Scan the code it shows with the iPhone's camera. Tuckvault opens in Expo Go.
+4. To pair by scanning there, make the pairing code open Expo Go instead of
+   the installed app (the address is the one `npm run go` printed):
+   `tuckvault phone pair --qr pair.png --link-prefix exp://ADDRESS:8093/--/`
 
 Everything is encrypted and stored exactly as with the installed app, and the
 backups are the same ones (the storage format is done in TypeScript there,

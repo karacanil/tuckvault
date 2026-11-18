@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Connecting to the computer is now one scan: point the phone's camera at the
+  code Tuckvault shows on the computer, check the address the app shows, and
+  tap **Connect to this computer**. Typing the address and code still works.
+- Clearer messages when a code has expired, was already used or was mistyped.
 - The app now also runs inside Expo Go, which makes it usable on an iPhone
   without a Mac or an Apple developer account: `npm run go` in `mobile/` serves
   it over Tailscale. There the storage format is done in TypeScript with the
