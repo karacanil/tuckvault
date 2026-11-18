@@ -44,7 +44,8 @@ def log(text):
 class Pc:
     """The PC side: a throwaway Tuckvault profile storing into a temp folder."""
 
-    def __init__(self, work: Path, ssh: str = None):
+    def __init__(self, work: Path, ssh: str = None, tailscale: bool = False):
+        self.tailscale = tailscale
         self.work = work
         self.home = work / "home"
         self.home.mkdir(parents=True)
@@ -65,7 +66,10 @@ class Pc:
         return res.returncode, res.stdout + res.stderr
 
     def start(self):
-        self.proc = subprocess.Popen([sys.executable, "-m", "tuckvault", "serve", "--listen", "127.0.0.1"],
+        # Normally only this computer itself is listened on. For a Tailscale address the service is
+        # started the way a user runs it: it then also listens on this computer's Tailscale address.
+        listen = [] if self.tailscale else ["--listen", "127.0.0.1"]
+        self.proc = subprocess.Popen([sys.executable, "-m", "tuckvault", "serve"] + listen,
                                      cwd=REPO, env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(100):
             code, out = self.run("phone", "status")
@@ -145,6 +149,9 @@ def main():
     ap.add_argument("--apk", required=True)
     ap.add_argument("--serial")
     ap.add_argument("--shots", help="folder to save screenshots into")
+    ap.add_argument("--address", default="10.0.2.2",
+                    help="address typed into the app (default: the emulator's name for this computer). Give "
+                         "this computer's Tailscale address or name to go through the Tailscale listener")
     ap.add_argument("--ssh", metavar="HOST:FOLDER",
                     help="store on another computer over SSH instead of a temp folder; the phone "
                          "backups then land in FOLDER-phones there")
@@ -154,7 +161,7 @@ def main():
     work = Path(tempfile.mkdtemp(prefix="tuckvault-e2e-"))
     shots = Path(args.shots) if args.shots else work / "shots"
     shots.mkdir(parents=True, exist_ok=True)
-    pc = Pc(work, args.ssh)
+    pc = Pc(work, args.ssh, tailscale=args.address != "10.0.2.2")
 
     def shot(name):
         d.screenshot(str(shots / (name + ".png")))
@@ -184,7 +191,7 @@ def main():
 
         log("setup: a wrong code is refused, the right one pairs")
         d.wait_for("address")
-        d.type_into("address", "10.0.2.2")
+        d.type_into("address", args.address)
         d.type_into("code", "AAAA-AAAA")
         d.back()  # put the keyboard away
         pc.pairing_code()  # a pairing is in progress, but the code typed is not it
