@@ -3,11 +3,12 @@
  * library, and files from folders.
  */
 
-import { Directory, Paths } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 import { Asset, AssetField, MediaType, Query, getPermissionsAsync, requestPermissionsAsync } from 'expo-media-library';
 import { Platform as RN } from 'react-native';
 
-import Native from '../../modules/tuckvault-core';
+import { tmpDir } from './device';
+import Native, { inExpoGo } from './native';
 import type { Item } from './engine';
 import { clean, photoPath, toMs } from './naming';
 import type { Folder, Settings } from './store';
@@ -27,16 +28,47 @@ export type Scan = {
 
 export type PhotoAccess = 'all' | 'limited' | 'none' | 'ask';
 
+/** False where the photo library cannot be had at all: Expo Go on Android is not allowed to see it. */
+export const photosPossible = !(inExpoGo && RN.OS === 'android');
+
 export async function photoAccess(): Promise<PhotoAccess> {
-  const got = await getPermissionsAsync(false, ['photo', 'video']);
-  if (got.granted) return got.accessPrivileges === 'limited' ? 'limited' : 'all';
-  return got.canAskAgain ? 'ask' : 'none';
+  try {
+    const got = await getPermissionsAsync(false, ['photo', 'video']);
+    if (got.granted) return got.accessPrivileges === 'limited' ? 'limited' : 'all';
+    return got.canAskAgain ? 'ask' : 'none';
+  } catch {
+    return 'none'; // the photo library is not there at all (Expo Go on Android)
+  }
 }
 
 export async function askPhotoAccess(): Promise<PhotoAccess> {
-  const got = await requestPermissionsAsync(false, ['photo', 'video']);
-  if (got.granted) return got.accessPrivileges === 'limited' ? 'limited' : 'all';
-  return got.canAskAgain ? 'ask' : 'none';
+  try {
+    const got = await requestPermissionsAsync(false, ['photo', 'video']);
+    if (got.granted) return got.accessPrivileges === 'limited' ? 'limited' : 'all';
+    return got.canAskAgain ? 'ask' : 'none';
+  } catch {
+    return 'none';
+  }
+}
+
+/**
+ * Where a photo in the iOS library can be read from. The native module reads the library's own
+ * file. Without it (inside Expo Go) that file may be out of reach; then the phone is asked for a
+ * copy, one at a time, which the next photo replaces.
+ */
+async function iosPhoto(id: string): Promise<string> {
+  const uri = await new Asset(id).getUri();
+  if (!Native.plainJs) return uri;
+  try {
+    new File(uri).open().close();
+    return uri;
+  } catch {
+    const staged = new File(tmpDir(), 'photo-in-hand');
+    if (staged.exists) staged.delete();
+    const legacy: typeof import('expo-file-system/legacy') = require('expo-file-system/legacy');
+    await legacy.copyAsync({ from: id.startsWith('ph://') ? id : 'ph://' + id, to: staged.uri });
+    return staged.uri;
+  }
 }
 
 async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
@@ -66,7 +98,7 @@ async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
         source,
         path: photoPath(asset.filename, id, created),
         // Android names a photo by an address the native code can read directly; on iOS it has to be asked for.
-        uri: RN.OS === 'android' ? id : () => new Asset(id).getUri(),
+        uri: RN.OS === 'android' ? id : () => iosPhoto(id),
         size: null,
         mtime: changed || created,
       });
@@ -107,8 +139,9 @@ export function inboxFolder(): Folder {
 
 export async function scan(settings: Settings): Promise<Scan> {
   const out: Scan = { items: [], sources: [], warnings: [], photos: 0, videos: 0, files: 0 };
-  if (settings.photos) await scanLibrary(settings, out);
-  const folders = RN.OS === 'ios' ? (settings.inbox ? [inboxFolder()] : []) : settings.folders;
+  if (settings.photos && photosPossible) await scanLibrary(settings, out);
+  // (Inside Expo Go there is no Files-app folder: the app's storage there belongs to Expo Go.)
+  const folders = RN.OS === 'ios' ? (settings.inbox && !inExpoGo ? [inboxFolder()] : []) : settings.folders;
   const taken = new Set<string>();
   for (const folder of folders) {
     let source = folderSource(folder);

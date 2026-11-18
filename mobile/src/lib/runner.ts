@@ -9,7 +9,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSyncExternalStore } from 'react';
 import { AppState, Platform as RN } from 'react-native';
 
-import Native from '../../modules/tuckvault-core';
+import Native from './native';
 import { BackupError, Client } from './client';
 import { clearTmp, device, manifestDir } from './device';
 import { iso, listBackups, manifest, restoreFile, runBackup, runVerify } from './engine';
@@ -90,7 +90,7 @@ export async function autoBlocker(): Promise<string | null> {
   const settings = getSettings();
   if (!settings.onboarded || !settings.server) return 'not set up';
   if (!settings.auto) return 'automatic backups are off';
-  if (settings.wifiOnly && !Native.onWifi()) return 'waiting for Wi-Fi';
+  if (settings.wifiOnly && !(await Native.onWifi())) return 'waiting for Wi-Fi';
   if (settings.chargingOnly && !(await charging())) return 'waiting for the charger';
   return null;
 }

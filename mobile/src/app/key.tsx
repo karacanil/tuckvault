@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, View } from 'react-native';
 
-import Native from '../../modules/tuckvault-core';
+import Native from '../lib/native';
 import { BackupError } from '../lib/client';
 import { backups } from '../lib/runner';
 import { setMasterKey, updateSettings } from '../lib/store';

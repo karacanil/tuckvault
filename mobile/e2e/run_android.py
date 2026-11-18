@@ -14,6 +14,11 @@ a video and a folder, and then proves the result from the outside:
 
     python mobile/e2e/run_android.py --apk <app.apk> [--serial emulator-5580] [--shots <folder>]
 
+With --expo-go exp://127.0.0.1:<port> instead of --apk, the same is done with the app running
+inside Expo Go (already installed on the emulator, `npx expo start --go` running and reachable
+there, e.g. through `adb reverse`). That runs the plain TypeScript storage code instead of the
+native module. Expo Go has no background work, so the last step is left out.
+
 Needs adb on PATH (or ADB set) and the Python requirements of Tuckvault.
 The emulator reaches this computer's own address as 10.0.2.2.
 """
@@ -31,6 +36,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import adb_ui  # noqa: E402
 from adb_ui import PACKAGE, Device  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -146,7 +152,8 @@ def allow_system_dialog(d: Device, timeout=8):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--apk", required=True)
+    ap.add_argument("--apk")
+    ap.add_argument("--expo-go", metavar="URL", help="run the app inside Expo Go from this exp:// address")
     ap.add_argument("--serial")
     ap.add_argument("--shots", help="folder to save screenshots into")
     ap.add_argument("--address", default="10.0.2.2",
@@ -156,8 +163,25 @@ def main():
                     help="store on another computer over SSH instead of a temp folder; the phone "
                          "backups then land in FOLDER-phones there")
     args = ap.parse_args()
+    if bool(args.apk) == bool(args.expo_go):
+        ap.error("give either --apk or --expo-go")
+    if args.expo_go:
+        adb_ui.PACKAGE = "host.exp.exponent"
 
     d = Device(args.serial)
+
+    def launch():
+        if not args.expo_go:
+            return d.launch()
+        d.shell("am start -a android.intent.action.VIEW -d %s host.exp.exponent" % args.expo_go)
+        deadline = time.time() + 240  # the first bundle takes a while
+        while d.find("get-started") is None and time.time() < deadline:
+            for button in ("Continue", "Close"):  # Expo Go introduces its developer menu once
+                if d.find(text=button) is not None:
+                    d.tap(text=button)
+                    time.sleep(1)
+            time.sleep(2)
+
     work = Path(tempfile.mkdtemp(prefix="tuckvault-e2e-"))
     shots = Path(args.shots) if args.shots else work / "shots"
     shots.mkdir(parents=True, exist_ok=True)
@@ -172,7 +196,8 @@ def main():
         first = ["TVTEST_0001.jpg", "TVTEST_0002.jpg", "TVTEST_0003.jpg", "TVTEST_clip.mp4"]
 
         log("installing the app and putting test media on the phone")
-        d.run("install", "-r", args.apk, timeout=300)
+        if args.apk:
+            d.run("install", "-r", args.apk, timeout=300)
         d.clear()
         d.shell("rm -rf /sdcard/DCIM/TuckvaultTest /sdcard/Pictures/TVTEST* /sdcard/DCIM/TVTEST*", check=False)
         push_media(d, media, first)
@@ -182,9 +207,9 @@ def main():
 
         # -- setup ---------------------------------------------------------
         log("setup: welcome")
-        d.launch()
+        launch()
         if d.dismiss_not_responding():  # the launcher of a freshly started emulator can hang for a moment
-            d.launch()
+            launch()
         d.wait_for("get-started", timeout=120)
         shot("01-welcome")
         d.tap("get-started")
@@ -220,9 +245,10 @@ def main():
 
         log("setup: what to back up")
         d.wait_for("toggle-photos")
-        d.tap("toggle-photos")
-        allow_system_dialog(d)
-        time.sleep(1)
+        if not args.expo_go:  # on Android, Expo Go is not allowed to see the photo library
+            d.tap("toggle-photos")
+            allow_system_dialog(d)
+            time.sleep(1)
         log("setup: add a folder with Android's folder picker")
         d.scroll_to("add-folder")
         d.tap("add-folder")
@@ -252,24 +278,31 @@ def main():
         out1 = work / "restored-1"
         pc.restore(recovery_key, out1)
         restored = {p.name: p for p in out1.rglob("*") if p.is_file()}
-        for name in first + ["notes.txt"]:
+        for name in ([] if args.expo_go else first) + ["notes.txt"]:
             assert name in restored, "missing in the backup: %s (has %s)" % (name, sorted(restored))
             assert sha(restored[name]) == sha(media / name), name + " differs from what was put on the phone"
-        from PIL import Image
-        gps = Image.open(restored["TVTEST_0001.jpg"]).getexif().get_ifd(0x8825)
-        assert gps.get(1) == "N", "the photo's location did not survive the backup: %r" % dict(gps)
+        if not args.expo_go:
+            from PIL import Image
+            gps = Image.open(restored["TVTEST_0001.jpg"]).getexif().get_ifd(0x8825)
+            assert gps.get(1) == "N", "the photo's location did not survive the backup: %r" % dict(gps)
         if pc.local:
             blobs = b"".join(p.read_bytes() for p in (work / "repo-phones").rglob("*")
                              if p.is_file() and p.parent.parent.name == "blobs")
             assert b"Tuckvault test" not in blobs and b"TVTEST" not in blobs and "gizli".encode() not in blobs, "plain data found"
         notes = restored["notes.txt"].relative_to(out1).as_posix()
         assert notes == "Files/TuckvaultNotes/notes.txt", notes
-        log("  restored %d files (photos, a video, a file from a chosen folder), all identical; location kept%s" % (
-            len(first) + 1, "; nothing readable stored" if pc.local else ""))
+        if args.expo_go:
+            log("  restored the file from the chosen folder, identical%s" % ("; nothing readable stored" if pc.local else ""))
+        else:
+            log("  restored %d files (photos, a video, a file from a chosen folder), all identical; location kept%s" % (
+                len(first) + 1, "; nothing readable stored" if pc.local else ""))
 
         # -- second backup: only what is new --------------------------------
-        log("second backup after one new photo")
-        push_media(d, media, ["TVTEST_0004.jpg"])
+        log("second backup after one new file")
+        if args.expo_go:
+            d.run("push", str(media / "TVTEST_0004.jpg"), "/sdcard/Documents/TuckvaultNotes/TVTEST_0004.jpg")
+        else:
+            push_media(d, media, ["TVTEST_0004.jpg"])
         d.tap("backup-now")
         deadline = time.time() + 240  # it can be over before the screen is read once
         while True:
@@ -290,19 +323,20 @@ def main():
         shot("09-backups")
         d.tap("backup-0")
         d.wait_for("file-search", timeout=30)
-        d.type_into("file-search", "TVTEST_0002")
+        d.type_into("file-search", "TVTEST_0004" if args.expo_go else "TVTEST_0002")
         d.back()
         d.wait_for("file-0")
         shot("10-backup-files")
         before = d.shell("content query --uri content://media/external/images/media --projection _display_name")
-        d.tap("file-0")
-        d.tap("save-to-photos")
-        d.wait_for(text="Restored", timeout=60)
-        assert d.find(contains="1 item saved to your photo library") is not None, d.texts()
-        shot("11-restored")
-        d.tap(text="OK")
-        after = d.shell("content query --uri content://media/external/images/media --projection _display_name")
-        assert after.count("TVTEST_0002") == before.count("TVTEST_0002") + 1, "the photo did not arrive in the library"
+        if not args.expo_go:
+            d.tap("file-0")
+            d.tap("save-to-photos")
+            d.wait_for(text="Restored", timeout=60)
+            assert d.find(contains="1 item saved to your photo library") is not None, d.texts()
+            shot("11-restored")
+            d.tap(text="OK")
+            after = d.shell("content query --uri content://media/external/images/media --projection _display_name")
+            assert after.count("TVTEST_0002") == before.count("TVTEST_0002") + 1, "the photo did not arrive in the library"
         d.back()
 
         # -- the app's own check ----------------------------------------------
@@ -330,6 +364,14 @@ def main():
         assert d.find(contains="Cannot reach your computer") is not None, d.texts()
         assert d.find(text="The last backup did not work") is not None, d.texts()
         shot("13-unreachable")
+        if args.expo_go:
+            pc.start()
+            out2 = work / "restored-2"
+            pc.restore(recovery_key, out2)
+            again = {p.name: p for p in out2.rglob("*") if p.is_file()}
+            assert sha(again["TVTEST_0004.jpg"]) == sha(media / "TVTEST_0004.jpg"), "the second backup's file differs"
+            log("ALL CHECKS PASSED (inside Expo Go, which has no background backups). Screenshots: " + str(shots))
+            return 0
 
         # -- background run and notification -----------------------------------
         log("a backup started by the system in the background")

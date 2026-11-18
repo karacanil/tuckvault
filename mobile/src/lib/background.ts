@@ -4,9 +4,7 @@
  * that time keeps what it uploaded and the next one continues.
  */
 
-import * as BackgroundTask from 'expo-background-task';
-import * as TaskManager from 'expo-task-manager';
-
+import { inExpoGo } from './native';
 import { startBackup } from './runner';
 import { getSettings } from './store';
 
@@ -14,18 +12,31 @@ export const TASK = 'tuckvault-auto-backup';
 /** The system decides the real moment; this is the shortest gap we ask for, in minutes. */
 const EVERY_MINUTES = 120;
 
+/** False inside Expo Go: it has no background work, so there backups run only while the app is open. */
+export const autoBackupPossible = !inExpoGo;
+
+// Loaded only where they exist; inside Expo Go even loading them fails.
+const BackgroundTask: typeof import('expo-background-task') | null =
+  autoBackupPossible ? require('expo-background-task') : null;
+const TaskManager: typeof import('expo-task-manager') | null =
+  autoBackupPossible ? require('expo-task-manager') : null;
+
 // Must be defined when the app's code loads, also when the system starts the app in the background.
-TaskManager.defineTask(TASK, async () => {
-  try {
-    await startBackup(true);
-    return BackgroundTask.BackgroundTaskResult.Success;
-  } catch {
-    return BackgroundTask.BackgroundTaskResult.Failed;
-  }
-});
+if (BackgroundTask && TaskManager) {
+  const results = BackgroundTask.BackgroundTaskResult;
+  TaskManager.defineTask(TASK, async () => {
+    try {
+      await startBackup(true);
+      return results.Success;
+    } catch {
+      return results.Failed;
+    }
+  });
+}
 
 /** Make the system's schedule match the setting. Safe to call often. */
 export async function syncAutoBackup(): Promise<void> {
+  if (!BackgroundTask || !TaskManager) return;
   try {
     const settings = getSettings();
     const wanted = settings.auto && settings.onboarded && !!settings.server;
@@ -39,6 +50,7 @@ export async function syncAutoBackup(): Promise<void> {
 
 /** False when the phone's settings forbid background work for this app. */
 export async function backgroundAllowed(): Promise<boolean> {
+  if (!BackgroundTask) return false;
   try {
     return (await BackgroundTask.getStatusAsync()) === BackgroundTask.BackgroundTaskStatus.Available;
   } catch {

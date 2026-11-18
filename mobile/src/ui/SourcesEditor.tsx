@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Alert, Linking, Platform, View } from 'react-native';
 
-import { askPhotoAccess, photoAccess, pickFolder } from '../lib/sources';
+import { inExpoGo } from '../lib/native';
+import { askPhotoAccess, photoAccess, photosPossible, pickFolder } from '../lib/sources';
 import type { PhotoAccess } from '../lib/sources';
 import { updateSettings, useSettings } from '../lib/store';
 import { Button, Card, Notice, P, Row, SectionTitle, ToggleRow } from './kit';
@@ -49,6 +50,13 @@ export function SourcesEditor() {
   return (
     <View>
       <SectionTitle>Photos and videos</SectionTitle>
+      {!photosPossible ? (
+        <View style={{ marginBottom: space.md }}>
+          <Notice kind="info" title="Not in the Expo Go version on Android">
+            Android does not let Expo Go see the photo library. Folders you add below are backed up.
+          </Notice>
+        </View>
+      ) : null}
       <Card padded={false}>
         <ToggleRow testID="toggle-photos" first icon="images-outline" title="Photos" value={photosOn} onChange={togglePhotos}
                    detail="Every photo on this phone, as the camera saved it." />
@@ -65,7 +73,11 @@ export function SourcesEditor() {
       ) : null}
 
       <SectionTitle>Files</SectionTitle>
-      {Platform.OS === 'ios' ? (
+      {Platform.OS === 'ios' && inExpoGo ? (
+        <Notice kind="info" title="Not in the Expo Go version">
+          Inside Expo Go, Tuckvault has no folder in the Files app, so only photos and videos are backed up.
+        </Notice>
+      ) : Platform.OS === 'ios' ? (
         <Card padded={false}>
           <ToggleRow testID="toggle-inbox" first icon="folder-outline" title="The Tuckvault folder" value={settings.inbox}
                      onChange={(v) => updateSettings({ inbox: v })}

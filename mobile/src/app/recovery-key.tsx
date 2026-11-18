@@ -2,7 +2,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
 import { View } from 'react-native';
 
-import Native from '../../modules/tuckvault-core';
+import Native from '../lib/native';
 import { getMasterKey } from '../lib/store';
 import { Button, Notice, P, Screen } from '../ui/kit';
 import { KeyBox } from '../ui/KeyBox';

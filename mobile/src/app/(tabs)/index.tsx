@@ -5,7 +5,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppState, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { backgroundAllowed } from '../../lib/background';
+import { autoBackupPossible, backgroundAllowed } from '../../lib/background';
+import { inExpoGo } from '../../lib/native';
 import { BackupError } from '../../lib/client';
 import type { Result } from '../../lib/engine';
 import { ago, baseName, describeRun, humanSize, plural } from '../../lib/format';
@@ -164,7 +165,7 @@ export default function Home() {
               </Notice>
             </View>
           ) : null}
-          {!background && settings.auto ? (
+          {autoBackupPossible && !background && settings.auto ? (
             <View style={{ marginBottom: space.md }}>
               <Notice kind="warn" title="Background activity is switched off for Tuckvault">
                 Automatic backups cannot run until you allow background activity for Tuckvault in the phone's settings.
@@ -192,7 +193,7 @@ export default function Home() {
                  detail={settings.photos ? (settings.videos ? 'Everything in your library' : 'Photos only, no videos') : 'Off'}
                  onPress={() => router.push('/(tabs)/settings')} />
             <Row icon="folder-outline" title="Files"
-                 detail={Platform.OS === 'ios' ? (settings.inbox ? 'The Tuckvault folder in the Files app' : 'Off')
+                 detail={Platform.OS === 'ios' ? (inExpoGo ? 'Not in the Expo Go version' : settings.inbox ? 'The Tuckvault folder in the Files app' : 'Off')
                    : settings.folders.length ? plural(settings.folders.length, 'folder') : 'No folders yet. Add some in Settings.'}
                  onPress={() => router.push('/(tabs)/settings')} />
           </Card>

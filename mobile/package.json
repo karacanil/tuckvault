@@ -4,6 +4,7 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
+    "@noble/hashes": "^2.4.0",
     "expo": "~58.0.26",
     "expo-background-task": "~58.0.13",
     "expo-battery": "~58.0.4",
@@ -29,6 +30,7 @@
     "expo-status-bar": "~58.0.5",
     "expo-system-ui": "~58.0.7",
     "expo-task-manager": "~58.0.14",
+    "fflate": "^0.8.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-native": "0.88.1",
@@ -42,10 +44,11 @@
   },
   "scripts": {
     "start": "expo start",
+    "go": "node tools/expo-go.cjs",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test",
-    "test": "node --test --experimental-strip-types --disable-warning=ExperimentalWarning test/vectors.test.ts test/naming.test.ts test/engine.test.ts"
+    "test": "node --test --experimental-strip-types --disable-warning=ExperimentalWarning test/vectors.test.ts test/vaultjs.test.ts test/naming.test.ts test/engine.test.ts"
   },
   "private": true
 }

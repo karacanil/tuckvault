@@ -1,17 +1,43 @@
 # Drives the app in an iOS simulator from first start to a restored photo.
 # Run by mobile/e2e/run_ios.sh, which starts `tuckvault serve` on the Mac and passes the pairing code:
 #
-#     maestro test -e CODE=ABCD-EFGH mobile/e2e/ios-flow.yaml
-appId: io.github.karacanil.tuckvault
+#     maestro test -e CODE=ABCD-EFGH -e APP_ID=io.github.karacanil.tuckvault -e LINK= mobile/e2e/ios-flow.yaml
+#
+# With APP_ID=host.exp.Exponent and LINK=exp://127.0.0.1:<port> the app is run inside Expo Go instead.
+appId: ${APP_ID}
 ---
 - launchApp:
     clearState: true
     permissions:
       all: allow
+- runFlow:
+    when:
+      true: ${LINK != ''}
+    commands:
+      - openLink: ${LINK}
+      # iOS asks whether the link may be opened in Expo Go
+      - extendedWaitUntil:
+          visible: "Open"
+          timeout: 20000
+          optional: true
+      - tapOn:
+          text: "Open"
+          optional: true
+      # Expo Go introduces its developer menu the first time a project opens
+      - extendedWaitUntil:
+          visible: "Continue"
+          timeout: 480000  # the first bundle is built now, and a busy machine takes minutes over it
+          optional: true
+      - tapOn:
+          text: "Continue"
+          optional: true
+      - tapOn:
+          text: "Close"
+          optional: true
 - extendedWaitUntil:
     visible:
       id: "get-started"
-    timeout: 60000
+    timeout: 180000
 - takeScreenshot: ios-01-welcome
 - tapOn:
     id: "get-started"

@@ -1,5 +1,14 @@
 # Changelog of the phone app
 
+## Unreleased
+
+- The app now also runs inside Expo Go, which makes it usable on an iPhone
+  without a Mac or an Apple developer account: `npm run go` in `mobile/` serves
+  it over Tailscale. There the storage format is done in TypeScript with the
+  phone's own AES and SHA-256 (tested against the PC's vectors); the installed
+  app keeps using its native module. Inside Expo Go there are no automatic
+  backups and no Files-app folder.
+
 ## 1.0.1
 
 - Android: the on-screen keyboard no longer covers the pairing code box and the Connect button. The form now stays above the keyboard.
