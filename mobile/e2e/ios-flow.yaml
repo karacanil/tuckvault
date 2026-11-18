@@ -26,7 +26,7 @@ appId: ${APP_ID}
       # Expo Go introduces its developer menu the first time a project opens
       - extendedWaitUntil:
           visible: "Continue"
-          timeout: 180000
+          timeout: 480000  # the first bundle is built now, and a busy machine takes minutes over it
           optional: true
       - tapOn:
           text: "Continue"
