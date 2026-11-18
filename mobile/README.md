@@ -132,6 +132,11 @@ backup with the recovery key and compares it byte for byte
 vectors as Android. It has **not yet been tried on a physical iPhone**, and
 automatic background backups cannot be tried in a simulator.
 
+<p>
+<img src="../docs/mobile/ios-04-backed-up.png" width="200" alt="The iOS app after a backup, in the simulator">
+<img src="../docs/mobile/ios-06-restored.png" width="200" alt="A photo restored on iOS, in the simulator">
+</p>
+
 Apple only lets apps onto an iPhone when they are signed with an Apple
 developer account, so there is no ready-to-install download. To put it on your
 own iPhone you need a Mac with Xcode and (free or paid) Apple developer
@@ -159,6 +164,11 @@ cd android
 `python mobile/e2e/run_android.py --apk <apk>` drives the installed app on an
 emulator from first start to a restored photo, and compares what the PC
 restores with what was put on the phone, byte for byte.
+
+`python3 tools/phone_over_network.py http://<address>:8743 <code>` plays a phone
+from a second computer: it pairs, sends an encrypted backup and prints what the
+receiving computer needs to restore and compare it. Use it to try the service
+across a real network link (a Tailscale address, for example) without a phone.
 
 Layout:
 
