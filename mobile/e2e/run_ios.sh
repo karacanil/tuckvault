@@ -53,6 +53,10 @@ explain() {
 }
 (cd "$SHOTS" && maestro --device "$SIM_UDID" test -e CODE="$CODE" "$REPO/mobile/e2e/ios-flow.yaml") || { explain; exit 1; }
 
+# Maestro keeps its screenshots in its own folder; bring them over (all but the recovery key).
+find "$HOME/.maestro/tests" -path "*takeScreenshot*" -name "ios-*.png" ! -name "*recovery-key*" \
+  -exec cp {} "$SHOTS/" \; 2>/dev/null || true
+
 echo "[e2e] the PC restores the phone's backup with the recovery key the app showed"
 KEY=$(xcrun simctl pbpaste "$SIM_UDID")
 # (kept simple on purpose: the bash that ships with macOS is old)

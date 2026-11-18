@@ -124,9 +124,13 @@ See [SECURITY.md](../SECURITY.md) for the limits.
 
 ## iPhone
 
-The app is built and started in an iOS simulator by this repository's CI on
-every change, and its storage code is tested there against the same vectors as
-Android. It has **not yet been tried on a physical iPhone**.
+On every change this repository's CI builds the iOS app and runs it in an
+iPhone simulator against the real PC program: it sets itself up, backs up the
+photo library, restores a photo on the phone, and the PC then restores the
+backup with the recovery key and compares it byte for byte
+(`mobile/e2e/run_ios.sh`). Its storage code is also tested against the same
+vectors as Android. It has **not yet been tried on a physical iPhone**, and
+automatic background backups cannot be tried in a simulator.
 
 Apple only lets apps onto an iPhone when they are signed with an Apple
 developer account, so there is no ready-to-install download. To put it on your
