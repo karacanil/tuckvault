@@ -75,8 +75,18 @@ appId: io.github.karacanil.tuckvault
 - takeScreenshot: ios-04-backed-up
 
 # get a photo back from the backup into the library
+# (the tab bar sometimes misses a tap right after the screen changed: wait, and tap again if nothing moved)
+- waitForAnimationToEnd:
+    timeout: 5000
 - tapOn:
     id: "tab-backups"
+    retryTapIfNoChange: true
+- runFlow:
+    when:
+      notVisible: "Every backup on your computer. Open one to get files back."
+    commands:
+      - tapOn:
+          id: "tab-backups"
 - extendedWaitUntil:
     visible:
       id: "backup-0"
