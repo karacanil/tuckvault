@@ -15,6 +15,14 @@ appId: ${APP_ID}
       true: ${LINK != ''}
     commands:
       - openLink: ${LINK}
+      # iOS asks whether the link may be opened in Expo Go
+      - extendedWaitUntil:
+          visible: "Open"
+          timeout: 20000
+          optional: true
+      - tapOn:
+          text: "Open"
+          optional: true
       # Expo Go introduces its developer menu the first time a project opens
       - extendedWaitUntil:
           visible: "Continue"
