@@ -1,0 +1,103 @@
+# Drives the app in an iOS simulator from first start to a restored photo.
+# Run by mobile/e2e/run_ios.sh, which starts `tuckvault serve` on the Mac and passes the pairing code:
+#
+#     maestro test -e CODE=ABCD-EFGH mobile/e2e/ios-flow.yaml
+appId: io.github.karacanil.tuckvault
+---
+- launchApp:
+    clearState: true
+    permissions:
+      all: allow
+- extendedWaitUntil:
+    visible:
+      id: "get-started"
+    timeout: 60000
+- takeScreenshot: ios-01-welcome
+- tapOn:
+    id: "get-started"
+
+# connect to the computer (the simulator shares the Mac's own address)
+# Return puts the keyboard away after each box; otherwise it covers the next one on a small screen.
+- tapOn:
+    id: "address"
+- inputText: "127.0.0.1"
+- pressKey: Enter
+- tapOn:
+    id: "code"
+- inputText: ${CODE}
+- pressKey: Enter
+- takeScreenshot: ios-01b-before-connect
+- tapOn:
+    id: "connect"
+
+# the recovery key: copied, so the test can hand it to the PC program afterwards
+- extendedWaitUntil:
+    visible: "Save your recovery key"
+    timeout: 30000
+- takeScreenshot: ios-02a-recovery-key
+- tapOn: "Copy"
+# on a small screen the tick box is below the fold
+- scrollUntilVisible:
+    element:
+      id: "key-saved"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "key-saved"
+- takeScreenshot: ios-02-recovery-key-step
+- tapOn:
+    id: "key-continue"
+
+# what to back up: Maestro has already answered the photo permission question with yes when it
+# started the app, so Photos and Videos are on and are left as they are
+- extendedWaitUntil:
+    visible:
+      id: "toggle-photos"
+    timeout: 20000
+- takeScreenshot: ios-03-choose
+- tapOn:
+    id: "finish-setup"
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# first backup
+- extendedWaitUntil:
+    visible:
+      id: "backup-now"
+    timeout: 30000
+- assertVisible: "Not backed up yet"
+- tapOn:
+    id: "backup-now"
+- extendedWaitUntil:
+    visible: "Your phone is backed up"
+    timeout: 240000
+- takeScreenshot: ios-04-backed-up
+
+# get a photo back from the backup into the library
+- tapOn:
+    id: "tab-backups"
+- extendedWaitUntil:
+    visible:
+      id: "backup-0"
+    timeout: 30000
+- takeScreenshot: ios-05-backups
+- tapOn:
+    id: "backup-0"
+- extendedWaitUntil:
+    visible:
+      id: "file-0"
+    timeout: 30000
+- tapOn:
+    id: "file-0"
+- tapOn:
+    id: "save-to-photos"
+- tapOn:
+    text: "Allow Full Access"
+    optional: true
+- extendedWaitUntil:
+    visible: "Restored"
+    timeout: 60000
+- assertVisible: "1 item saved to your photo library."
+- takeScreenshot: ios-06-restored
+- tapOn: "OK"

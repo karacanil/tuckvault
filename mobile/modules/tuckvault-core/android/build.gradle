@@ -1,0 +1,29 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.tuckvaultcore'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.tuckvaultcore"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+  testOptions {
+    unitTests.all {
+      // the test vectors are shared with the Python and Swift tests
+      systemProperty "tuckvault.vectors", new File(projectDir, "../test-vectors.json").absolutePath
+    }
+  }
+}
+
+dependencies {
+  testImplementation 'junit:junit:4.13.2'
+  testImplementation 'org.json:json:20240303'
+}

@@ -133,7 +133,8 @@ class Repo:
                 self.remote.call("init", meta=meta)
                 log.info("created new repository %s", meta["id"])
             else:
-                master = keystore.load()
+                # "_key" is set when restoring another device's backups (a phone's) with its recovery key
+                master = cfg.get("_key") or keystore.load()
                 if master is None:
                     raise BackupError(
                         "The destination already holds backups, but this PC has no key for "

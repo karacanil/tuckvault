@@ -5,13 +5,14 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import webbrowser
 from datetime import datetime, timezone
 from tkinter import filedialog, messagebox, ttk
 from tkinter import font as tkfont
 
-from . import __version__, config, engine, keystore, paths, scheduler, updates, watch
+from . import __version__, config, crypto, engine, keystore, paths, scheduler, updates, watch
 
 FREQ_LABELS = {"hourly": "Every few hours", "daily": "Every day",
                "weekly": "Every week", "monthly": "Every month"}
@@ -158,6 +159,7 @@ class App(tk.Tk):
         self._build_backup_tab()
         self._build_restore_tab()
         self._build_activity_tab()
+        self._build_phones_tab()
         self._build_security_tab()
         self._build_status_bar()
 
@@ -357,6 +359,163 @@ class App(tk.Tk):
                                   "this window opens)",
                         variable=self.v_updates, command=self._updates_changed).pack(anchor="w", pady=(4, 0))
         ttk.Label(tab, text=f"Tuckvault {__version__}", foreground="#777").pack(anchor="e", side="bottom")
+
+    def _build_phones_tab(self):
+        tab = ttk.Frame(self.notebook, padding=PAD * 2)
+        self.notebook.add(tab, text="  Phones  ")
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(4, weight=1)
+        text = ("The Tuckvault app for Android and iPhone backs up photos and files to this computer. "
+                "Each phone encrypts its own backups with its own key, so this computer only stores "
+                "unreadable data, next to your PC backups. Phones reach this computer over Tailscale, "
+                "which must be running here and on the phone.")
+        ttk.Label(tab, text=text, wraplength=720, justify="left").grid(row=0, column=0, columnspan=2, sticky="w")
+        self.v_phones_on = tk.BooleanVar()
+        self.phones_toggle = ttk.Checkbutton(
+            tab, text="Accept backups from phones (keeps running in the background, also after a restart)",
+            variable=self.v_phones_on, command=self._phones_toggled)
+        self.phones_toggle.grid(row=1, column=0, columnspan=2, sticky="w", pady=(PAD * 2, 4))
+        self.phones_status = ttk.Label(tab, text="", wraplength=720, justify="left", foreground="#555")
+        self.phones_status.grid(row=2, column=0, columnspan=2, sticky="w")
+        ttk.Label(tab, text="Paired phones", font=self.bold_font).grid(row=3, column=0, sticky="w", pady=(PAD * 2, 4))
+        cols = ("name", "kind", "paired")
+        self.phones_list = ttk.Treeview(tab, columns=cols, show="headings", selectmode="browse", height=5)
+        for col, title, width in (("name", "Name", 300), ("kind", "Kind", 100), ("paired", "Paired", 200)):
+            self.phones_list.heading(col, text=title, anchor="w")
+            self.phones_list.column(col, width=width, anchor="w", stretch=(col == "name"))
+        self.phones_list.grid(row=4, column=0, columnspan=2, sticky="nsew")
+        row = ttk.Frame(tab)
+        row.grid(row=5, column=0, columnspan=2, sticky="w", pady=(PAD, 0))
+        ttk.Button(row, text="Pair a phone…", command=self._pair_phone).pack(side="left")
+        ttk.Button(row, text="Remove", command=self._remove_phone).pack(side="left", padx=PAD)
+        restore = ttk.Button(row, text="Restore a phone's backup to this computer…", command=self._restore_phone)
+        restore.pack(side="left", padx=(PAD * 2, 0))
+        self.action_buttons.append(restore)
+        self.notebook.bind("<<NotebookTabChanged>>", lambda _e: self._refresh_phones(), add="+")
+        self._refresh_phones()
+
+    def _refresh_phones(self):
+        """Fill the Phones tab. The slow questions (is it running, Tailscale's address) are asked off-screen."""
+        from . import server
+        self.phones_list.delete(*self.phones_list.get_children())
+        for device, info in sorted(server.load()["devices"].items(), key=lambda kv: kv[1].get("paired") or ""):
+            self.phones_list.insert("", "end", iid=device, values=(
+                info.get("name") or "Phone", {"android": "Android", "ios": "iPhone"}.get(info.get("platform"), ""),
+                local_time(info.get("paired") or "")))
+
+        def ask():
+            from . import phones
+            try:
+                enabled = scheduler.phones_enabled()
+                lines = phones.status_lines(self.cfg)
+            except Exception as e:  # deliberately broad: this is only a status display
+                enabled, lines = False, [str(e)]
+            self.events.put(("phones", (enabled, "\n".join(lines))))
+
+        threading.Thread(target=ask, daemon=True).start()
+
+    def _phones_toggled(self):
+        want = self.v_phones_on.get()
+        if not self._save(quiet=True):
+            self.v_phones_on.set(not want)
+            return
+        self.phones_toggle.state(["disabled"])
+
+        def work():
+            from . import server
+            try:
+                if want:
+                    server.phones_root(self.cfg)
+                    scheduler.phones_enable()
+                    for _ in range(20):  # give it a moment to come up before the status is read
+                        if server.is_running():
+                            break
+                        time.sleep(0.5)
+                else:
+                    scheduler.phones_disable()
+                error = None
+            except (OSError, server.ServeError) as e:
+                error = str(e)
+            self.events.put(("phones_done", error))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _pair_phone(self):
+        from . import server
+        if not server.is_running():
+            messagebox.showinfo("Tuckvault", "Switch on \"Accept backups from phones\" first.", parent=self)
+            return
+        addresses = server.phone_addresses()
+        if not addresses:
+            messagebox.showwarning(
+                "Tuckvault", "Tailscale is not running on this computer, so a phone cannot reach it.\n\n"
+                "Start Tailscale, sign in, and try again.", parent=self)
+            return
+        code = server.new_pairing_code()
+        win = tk.Toplevel(self)
+        win.title("Pair a phone")
+        win.transient(self)
+        win.resizable(False, False)
+        frame = ttk.Frame(win, padding=PAD * 3)
+        frame.pack()
+        ttk.Label(frame, text="In the Tuckvault app on your phone, enter:", justify="left").pack(anchor="w")
+        ttk.Label(frame, text="Address", foreground="#555").pack(anchor="w", pady=(PAD * 2, 0))
+        address = ttk.Entry(frame, font=("Consolas", 13), width=max(30, len(addresses[0]) + 2), justify="center")
+        address.insert(0, addresses[0])
+        address.configure(state="readonly")
+        address.pack(anchor="w")
+        ttk.Label(frame, text="Code", foreground="#555").pack(anchor="w", pady=(PAD * 2, 0))
+        shown = ttk.Entry(frame, font=("Consolas", 22, "bold"), width=12, justify="center")
+        shown.insert(0, code)
+        shown.configure(state="readonly")
+        shown.pack(anchor="w")
+        ttk.Label(frame, text=f"The code works once, for {server.PAIR_MINUTES} minutes. "
+                              "Both devices need Tailscale switched on.",
+                  foreground="#555", wraplength=420, justify="left").pack(anchor="w", pady=(PAD * 2, 0))
+
+        def close():
+            win.destroy()
+            self._refresh_phones()
+
+        ttk.Button(frame, text="Done", command=close).pack(anchor="e", pady=(PAD * 2, 0))
+        win.protocol("WM_DELETE_WINDOW", close)
+        win.grab_set()
+
+    def _remove_phone(self):
+        from . import server
+        picked = self.phones_list.selection()
+        if not picked:
+            messagebox.showinfo("Tuckvault", "Choose a phone in the list first.", parent=self)
+            return
+        name = self.phones_list.item(picked[0], "values")[0]
+        if messagebox.askyesno(
+                "Tuckvault", f"Remove \"{name}\"?\n\nThat phone can no longer back up to or restore from this "
+                "computer until it is paired again. Its backups are kept.", parent=self):
+            server.remove_device(picked[0])
+            self._refresh_phones()
+
+    def _restore_phone(self):
+        from tkinter import simpledialog
+        from . import phones
+        key = simpledialog.askstring(
+            "Restore a phone's backup", "Recovery key shown in the phone app (Settings, Recovery key):",
+            parent=self)
+        if not key:
+            return
+        try:
+            crypto.decode_recovery_key(key)
+        except ValueError as e:
+            messagebox.showerror("Tuckvault", str(e), parent=self)
+            return
+        dest = filedialog.askdirectory(title="Folder to restore the phone's files into", parent=self)
+        if not dest:
+            return
+
+        def done(result):
+            self._report(result, f"Restored {result.get('files', 0)} files from the phone into {dest}.")
+            self._refresh_activity()
+
+        self._start(lambda progress: phones.restore(self.cfg, dest, key, progress=progress), done)
 
     def _build_status_bar(self):
         bar = ttk.Frame(self, padding=(PAD, 6))
@@ -627,6 +786,14 @@ class App(tk.Tk):
                 kind, data = self.events.get_nowait()
                 if kind == "progress":
                     latest = data
+                elif kind == "phones":
+                    self.v_phones_on.set(data[0])
+                    self.phones_status.configure(text=data[1])
+                elif kind == "phones_done":
+                    self.phones_toggle.state(["!disabled"])
+                    if data:
+                        messagebox.showerror("Tuckvault", data, parent=self)
+                    self._refresh_phones()
                 elif kind == "update":
                     self.update_note.configure(
                         text=f"Tuckvault {data} is available. Click here to open the download page.")

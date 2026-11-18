@@ -310,6 +310,39 @@ class GuiFlow(unittest.TestCase):
         self.wait_idle()
         self.assertEqual(self.dialogs[-1][0], "showerror")
 
+    def test_phones_tab_pairs_lists_and_removes(self):
+        from tuckvault import scheduler, server
+        app = self.app
+        with mock.patch.object(scheduler, "phones_enabled", return_value=False):
+            # nothing is running: pairing explains what to switch on first
+            with mock.patch.object(server, "is_running", return_value=False):
+                app._pair_phone()
+            self.assertEqual(self.dialogs[-1][0], "showinfo")
+            # running, but no Tailscale: the user is told why a phone could not reach this PC
+            with mock.patch.object(server, "is_running", return_value=True), \
+                    mock.patch.object(server, "phone_addresses", return_value=[]):
+                app._pair_phone()
+            self.assertEqual(self.dialogs[-1][0], "showwarning")
+            self.assertIn("Tailscale", self.dialogs[-1][1][1])
+            # running and reachable: the window shows an address and a code that really pairs
+            with mock.patch.object(server, "is_running", return_value=True), \
+                    mock.patch.object(server, "phone_addresses", return_value=["http://pc.example.ts.net:8743"]):
+                app._pair_phone()
+            app.update()
+            dialog = [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)][-1]
+            shown = [w.get() for w in dialog.winfo_children()[0].winfo_children() if isinstance(w, gui.ttk.Entry)]
+            self.assertEqual(shown[0], "http://pc.example.ts.net:8743")
+            paired = server.pair(shown[1], "Pixel 9", "android")
+            dialog.destroy()
+            app._refresh_phones()
+            app.update()
+            self.assertEqual(app.phones_list.item(paired["device"], "values")[:2], ("Pixel 9", "Android"))
+            self.assertNotIn(paired["secret"], str(app.phones_list.item(paired["device"])))
+            app.phones_list.selection_set(paired["device"])
+            app._remove_phone()  # the question is answered with yes by the recorder
+            self.assertEqual(server.load()["devices"], {})
+            self.assertEqual(app.phones_list.get_children(), ())
+
 
 if __name__ == "__main__":
     unittest.main()
