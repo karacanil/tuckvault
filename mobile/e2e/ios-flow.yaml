@@ -6,6 +6,8 @@ appId: io.github.karacanil.tuckvault
 ---
 - launchApp:
     clearState: true
+    permissions:
+      all: allow
 - extendedWaitUntil:
     visible:
       id: "get-started"
@@ -46,15 +48,12 @@ appId: io.github.karacanil.tuckvault
 - tapOn:
     id: "key-continue"
 
-# what to back up
-- tapOn:
-    id: "toggle-photos"
-- tapOn:
-    text: "Allow Full Access"
-    optional: true
-- tapOn:
-    text: "Allow Access to All Photos"
-    optional: true
+# what to back up: Maestro has already answered the photo permission question with yes when it
+# started the app, so Photos and Videos are on and are left as they are
+- extendedWaitUntil:
+    visible:
+      id: "toggle-photos"
+    timeout: 20000
 - takeScreenshot: ios-03-choose
 - tapOn:
     id: "finish-setup"
