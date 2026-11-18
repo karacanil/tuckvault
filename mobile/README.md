@@ -129,8 +129,8 @@ iPhone simulator against the real PC program: it sets itself up, backs up the
 photo library, restores a photo on the phone, and the PC then restores the
 backup with the recovery key and compares it byte for byte
 (`mobile/e2e/run_ios.sh`). Its storage code is also tested against the same
-vectors as Android. It has **not yet been tried on a physical iPhone**, and
-automatic background backups cannot be tried in a simulator.
+vectors as Android. The same run is repeated with the app inside Expo Go.
+Automatic background backups cannot be tried in a simulator.
 
 <p>
 <img src="../docs/mobile/ios-04-backed-up.png" width="200" alt="The iOS app after a backup, in the simulator">
@@ -138,9 +138,35 @@ automatic background backups cannot be tried in a simulator.
 </p>
 
 Apple only lets apps onto an iPhone when they are signed with an Apple
-developer account, so there is no ready-to-install download. To put it on your
-own iPhone you need a Mac with Xcode and (free or paid) Apple developer
-sign-in:
+developer account, so there is no ready-to-install download. There are two
+ways to use it on your own iPhone.
+
+### Inside Expo Go (no Mac, no developer account)
+
+[Expo Go](https://apps.apple.com/app/expo-go/id982107779) is a free app from
+the App Store that runs Expo projects. Tuckvault runs inside it, served from
+your computer:
+
+1. On the iPhone, install Expo Go and Tailscale and sign in to both.
+2. On the computer, in `mobile/`: `npm ci` once, then `npm run go`. The first
+   time it asks you to sign in to Expo; use the same account as in Expo Go.
+3. Scan the code it shows with the iPhone's camera. Tuckvault opens in Expo Go.
+
+Everything is encrypted and stored exactly as with the installed app, and the
+backups are the same ones (the storage format is done in TypeScript there,
+with the phone's own AES and SHA-256, and is tested against the same vectors).
+What is different inside Expo Go:
+
+- No automatic backups: Expo Go cannot run in the background. Open the app
+  and tap **Back up now**.
+- No Tuckvault folder in the Files app, so photos and videos only.
+- The computer running `npm run go` must be reachable to open the app.
+- On Android, Expo Go may not see the photo library; use the APK there.
+
+### Built with Xcode
+
+With a Mac with Xcode and a (free or paid) Apple developer sign-in you get
+the full app:
 
 ```
 cd mobile
@@ -165,6 +191,10 @@ cd android
 emulator from first start to a restored photo, and compares what the PC
 restores with what was put on the phone, byte for byte.
 
+With `--expo-go exp://127.0.0.1:<port>` instead of `--apk` the same script
+drives the app inside Expo Go (`npx expo start --go` running, the port passed
+on with `adb reverse`).
+
 `python3 tools/phone_over_network.py http://<address>:8743 <code>` plays a phone
 from a second computer: it pairs, sends an encrypted backup and prints what the
 receiving computer needs to restore and compare it. Use it to try the service
@@ -178,4 +208,5 @@ Layout:
 | `src/lib/sources.ts`, `runner.ts`, `background.ts`, `notify.ts` | Finding photos and files, running backups, automatic runs, notifications |
 | `src/app/`, `src/ui/` | The screens |
 | `modules/tuckvault-core/` | The native module: storage format and file reading in Kotlin and Swift |
+| `src/lib/native.ts`, `jscore.ts`, `vaultjs.ts` | The same in TypeScript, used where the native module is absent (Expo Go) |
 | `test/`, `e2e/` | Tests |
