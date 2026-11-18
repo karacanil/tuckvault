@@ -150,7 +150,7 @@ test('a scanned pairing code is understood, and anything else is left alone', ()
 test('a phone pairs with the picture the computer makes, once', async () => {
   const picture = path.join(tmp, 'pair.png');
   const shown = python(['phone', 'pair', '--qr', picture]);
-  assert.match(shown.out, /saved as a picture/, shown.out + shown.err);
+  assert.match(shown.out, /saved as a picture/, shown.out);
   assert.equal(fs.readFileSync(picture).subarray(1, 4).toString(), 'PNG');
   const token = JSON.parse(fs.readFileSync(path.join(tmp, 'home', 'phones.json'), 'utf8')).pairing;
   assert.ok(token.link && !('token' in token)); // only a hash of the token is kept on the computer

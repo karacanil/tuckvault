@@ -82,9 +82,9 @@ def _command(args, cfg, out) -> int:
             return 1
         addresses = server.phone_addresses()
         if not addresses:
-            out("Tailscale is not running on this computer, so a phone cannot reach it. "
-                "Start Tailscale, sign in, and try again.")
-            return 1
+            out("Tailscale is not running on this computer, so a phone elsewhere cannot reach it. "
+                "Start Tailscale and sign in, then pair again.")
+            addresses = ["http://127.0.0.1:%d" % server.port()]  # only something on this computer itself
         pairing = server.new_pairing()
         link = server.pairing_link(addresses[0], pairing["token"], args.link_prefix or server.APP_LINK)
         drawn = None
