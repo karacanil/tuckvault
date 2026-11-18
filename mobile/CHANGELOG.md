@@ -1,5 +1,10 @@
 # Changelog of the phone app
 
+## 1.0.1
+
+- Android: the on-screen keyboard no longer covers the pairing code box and the Connect button. The form now stays above the keyboard.
+- The keyboard's own key moves from the address to the code and then connects.
+
 ## 1.0.0
 
 First release. Needs Tuckvault 1.5.0 or newer on the computer.

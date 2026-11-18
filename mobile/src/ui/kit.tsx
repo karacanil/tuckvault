@@ -3,8 +3,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import type { ComponentProps, ReactNode } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import type { ComponentProps, ComponentRef, ReactNode, Ref } from 'react';
+import { ActivityIndicator, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import type { StyleProp, TextInputProps, TextStyle, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -21,15 +22,36 @@ export function Bar({ light }: { light?: boolean }) {
   return useIsFocused() ? <StatusBar style={light || t.dark ? 'light' : 'dark'} /> : null;
 }
 
+/**
+ * How much of the bottom of the screen the on-screen keyboard covers, on Android.
+ * Android draws this app edge to edge and no longer makes room for the keyboard itself,
+ * so a screen that has things to type into lifts its content by this much. (On iOS the
+ * screens that need it use KeyboardAvoidingView, which does the same there.)
+ */
+function useKeyboardCover(): number {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const show = Keyboard.addListener('keyboardDidShow', (e) => setHeight(e.endCoordinates.height));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return height;
+}
+
 export function Screen({ children, scroll = true, footer, padTop = false }: {
   children: ReactNode; scroll?: boolean; footer?: ReactNode; padTop?: boolean;
 }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboard = useKeyboardCover();
   const pad = { paddingHorizontal: space.lg, paddingTop: space.lg,
                 paddingBottom: space.xl + (footer ? 0 : insets.bottom) };
   return (
-    <View style={{ flex: 1, backgroundColor: t.bg }}>
+    <View style={{ flex: 1, backgroundColor: t.bg, paddingBottom: keyboard ? keyboard + insets.bottom : 0 }}>
       <Bar />
       {/* a fixed strip, so scrolled content never shows through the status bar */}
       {padTop ? <View style={{ height: insets.top, backgroundColor: t.bg }} /> : null}
@@ -39,7 +61,8 @@ export function Screen({ children, scroll = true, footer, padTop = false }: {
         <View style={[{ flex: 1 }, pad]}>{children}</View>
       )}
       {footer ? (
-        <View style={{ paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: insets.bottom + space.md,
+        <View style={{ paddingHorizontal: space.lg, paddingTop: space.md,
+                       paddingBottom: (keyboard ? 0 : insets.bottom) + space.md,
                        backgroundColor: t.bg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }}>
           {footer}
         </View>
@@ -195,12 +218,14 @@ export function ProgressBar({ value, color, track }: { value: number | null; col
   );
 }
 
-export function Field({ label, hint, error, ...input }: TextInputProps & { label: string; hint?: string; error?: string | null }) {
+export function Field({ label, hint, error, inputRef, ...input }: TextInputProps & {
+  label: string; hint?: string; error?: string | null; inputRef?: Ref<ComponentRef<typeof TextInput>>;
+}) {
   const t = useTheme();
   return (
     <View style={{ marginBottom: space.lg }}>
       <Text style={{ color: t.text, fontSize: 14, fontWeight: '600', marginBottom: 6 }}>{label}</Text>
-      <TextInput accessibilityLabel={label} placeholderTextColor={t.faint} autoCorrect={false} {...input}
+      <TextInput ref={inputRef} accessibilityLabel={label} placeholderTextColor={t.faint} autoCorrect={false} {...input}
                  style={[{ backgroundColor: t.card, color: t.text, borderWidth: 1, borderColor: error ? t.bad : t.border,
                            borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: 13, fontSize: 16 }, input.style]} />
       {error ? <Text style={{ color: t.bad, fontSize: 13, marginTop: 6 }}>{error}</Text> :

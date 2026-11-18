@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, View } from 'react-native';
+import { useRef, useState } from 'react';
+import type { ComponentRef } from 'react';
+import { KeyboardAvoidingView, Platform, TextInput, View } from 'react-native';
 
 import { BackupError, hello, normalizeAddress, pair } from '../lib/client';
 import { device } from '../lib/device';
@@ -15,6 +16,7 @@ export default function Connect() {
   const [name, setName] = useState(getSettings().deviceName);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const codeBox = useRef<ComponentRef<typeof TextInput>>(null);
 
   async function connect() {
     setError(null);
@@ -58,9 +60,10 @@ export default function Connect() {
         </Card>
         <Field testID="address" label="Address" value={address} onChangeText={setAddress} autoCapitalize="none"
                keyboardType="url" placeholder="my-pc.tailnet.ts.net or 100.x.y.z" returnKeyType="next"
+               submitBehavior="submit" onSubmitEditing={() => codeBox.current?.focus()}
                hint="As shown on your computer. The port :8743 is added for you if you leave it out." />
         <Field testID="code" label="Pairing code" value={code} onChangeText={setCode} autoCapitalize="characters"
-               placeholder="ABCD-EFGH" maxLength={12} returnKeyType="next"
+               placeholder="ABCD-EFGH" maxLength={12} returnKeyType="go" inputRef={codeBox} onSubmitEditing={connect}
                hint="Works once, for ten minutes." />
         <Field testID="device-name" label="Name of this phone" value={name} onChangeText={setName} maxLength={40}
                hint="Shown on your computer and in your backups." />

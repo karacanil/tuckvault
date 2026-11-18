@@ -192,7 +192,10 @@ def main():
         log("setup: a wrong code is refused, the right one pairs")
         d.wait_for("address")
         d.type_into("address", args.address)
-        d.type_into("code", "AAAA-AAAA")
+        d.shell("input keyevent 66")  # the keyboard's Next key moves on to the code
+        time.sleep(1)
+        d.shell("input text AAAA-AAAA")
+        time.sleep(0.5)
         d.back()  # put the keyboard away
         pc.pairing_code()  # a pairing is in progress, but the code typed is not it
         d.tap("connect")
