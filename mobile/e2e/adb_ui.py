@@ -67,12 +67,14 @@ class Device:
 
     def wait_for(self, test_id: str = None, text: str = None, contains: str = None, timeout: float = 30):
         deadline = time.time() + timeout
+        extended = 0
         while True:
             node = self.find(test_id, text, contains)
             if node is not None:
                 return node
-            if self.dismiss_not_responding():
-                deadline += 20  # a slow emulator, not the app: give it the time back
+            if extended < 5 and self.dismiss_not_responding():
+                extended += 1
+                deadline += 20  # a slow emulator, not the app: give it the time back (a few times at most)
                 continue
             if time.time() > deadline:
                 raise AssertionError("did not appear: %s. On screen: %s"
