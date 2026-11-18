@@ -51,7 +51,23 @@ explain() {
   echo "[e2e] the flow stopped; the last lines of the app's log:"
   grep -iE "error|exception|fatal|tuckvault" "$SHOTS/app-log.txt" | tail -40 || true
 }
-(cd "$SHOTS" && maestro --device "$SIM_UDID" test -e CODE="$CODE" "$REPO/mobile/e2e/ios-flow.yaml") || { explain; exit 1; }
+# On a busy machine Maestro's helper app can be slow to start inside the simulator; give it time,
+# and if it still was not ready (the app was never touched), try once more with a fresh code.
+export MAESTRO_DRIVER_STARTUP_TIMEOUT=${MAESTRO_DRIVER_STARTUP_TIMEOUT:-300000}
+flow() {
+  (cd "$SHOTS" && maestro --device "$SIM_UDID" test -e CODE="$CODE" "$REPO/mobile/e2e/ios-flow.yaml") 2>&1 | tee "$WORK/maestro.log"
+  return "${PIPESTATUS[0]}"
+}
+if ! flow; then
+  if grep -q "driver not ready in time" "$WORK/maestro.log"; then
+    echo "[e2e] the test driver was not ready; trying once more"
+    CODE=$("$PY" -m tuckvault phone pair | awk '/Code:/ {print $2}')
+    flow || { explain; exit 1; }
+  else
+    explain
+    exit 1
+  fi
+fi
 
 # Maestro keeps its screenshots in its own folder; bring them over (all but the recovery key).
 find "$HOME/.maestro/tests" -path "*takeScreenshot*" -name "ios-*.png" ! -name "*recovery-key*" \
