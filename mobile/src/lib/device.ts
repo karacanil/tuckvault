@@ -6,7 +6,7 @@
 import { Directory, File, Paths, UploadType } from 'expo-file-system';
 import { Platform as RN } from 'react-native';
 
-import Native from '../../modules/tuckvault-core';
+import Native, { inExpoGo } from './native';
 import type { HttpReply, Platform } from './platform';
 
 function ensure(dir: Directory): Directory {
@@ -20,7 +20,8 @@ function ensure(dir: Directory): Directory {
  * records live beside it instead.
  */
 export function dataDir(): Directory {
-  if (RN.OS === 'ios') {
+  // (Inside Expo Go the app may only use its own corner of Expo Go's storage.)
+  if (RN.OS === 'ios' && !inExpoGo) {
     return ensure(new Directory(Paths.document.parentDirectory, 'Library', 'Application Support', 'tuckvault'));
   }
   return ensure(new Directory(Paths.document, 'tuckvault'));

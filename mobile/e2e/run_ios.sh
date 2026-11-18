@@ -7,6 +7,10 @@
 # Maestro (ios-flow.yaml) through setup, a backup and a restore on the phone, and then lets the
 # PC program restore the phone's backup with the recovery key the app showed. What comes back
 # must be, byte for byte, what was put into the library.
+#
+# With EXPO_GO_LINK=exp://127.0.0.1:<port> the same is done with the app running inside Expo Go
+# (installed in the simulator, `npx expo start --go` running): that is the plain TypeScript
+# storage code instead of the Swift module.
 set -euo pipefail
 
 : "${SIM_UDID:?set SIM_UDID to the id of the simulator}"
@@ -14,6 +18,9 @@ REPO=$(cd "$(dirname "$0")/../.." && pwd)
 SHOTS=${1:-"$REPO/ios-shots"}
 WORK=$(mktemp -d)
 PY=${PYTHON:-python3}
+LINK=${EXPO_GO_LINK:-}
+APP_ID=io.github.karacanil.tuckvault
+if [ -n "$LINK" ]; then APP_ID=host.exp.Exponent; fi
 mkdir -p "$SHOTS" "$WORK/home"
 cd "$REPO"
 
@@ -45,7 +52,7 @@ explain() {
   xcrun simctl io "$SIM_UDID" screenshot "$SHOTS/ios-failure.png" || true
   cp -R "$HOME/.maestro/tests" "$SHOTS/maestro-debug" 2>/dev/null || true
   xcrun simctl spawn "$SIM_UDID" log show --last 6m --style compact \
-    --predicate 'process == "Tuckvault"' > "$SHOTS/app-log.txt" 2>&1 || true
+    --predicate 'process == "Tuckvault" OR process == "Expo Go"' > "$SHOTS/app-log.txt" 2>&1 || true
   cp "$WORK/serve.log" "$SHOTS/serve-log.txt" 2>/dev/null || true
   cp "$TUCKVAULT_HOME/tuckvault.log" "$SHOTS/tuckvault-log.txt" 2>/dev/null || true
   echo "[e2e] the flow stopped; the last lines of the app's log:"
@@ -55,7 +62,7 @@ explain() {
 # and if it still was not ready (the app was never touched), try once more with a fresh code.
 export MAESTRO_DRIVER_STARTUP_TIMEOUT=${MAESTRO_DRIVER_STARTUP_TIMEOUT:-300000}
 flow() {
-  (cd "$SHOTS" && maestro --device "$SIM_UDID" test -e CODE="$CODE" "$REPO/mobile/e2e/ios-flow.yaml") 2>&1 | tee "$WORK/maestro.log"
+  (cd "$SHOTS" && maestro --device "$SIM_UDID" test -e CODE="$CODE" -e APP_ID="$APP_ID" -e LINK="$LINK" "$REPO/mobile/e2e/ios-flow.yaml") 2>&1 | tee "$WORK/maestro.log"
   return "${PIPESTATUS[0]}"
 }
 if ! flow; then

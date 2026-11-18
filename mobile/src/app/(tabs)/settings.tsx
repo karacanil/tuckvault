@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Linking, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { syncAutoBackup } from '../../lib/background';
+import { autoBackupPossible, syncAutoBackup } from '../../lib/background';
 import { ago } from '../../lib/format';
 import { allowed, ask, scheduleOverdueReminder } from '../../lib/notify';
 import { startVerify, useActivity } from '../../lib/runner';
@@ -80,6 +80,11 @@ export default function Settings() {
         <SourcesEditor />
 
         <SectionTitle>Automatic backup</SectionTitle>
+        {!autoBackupPossible ? (
+          <Notice kind="info" title="Not in the Expo Go version">
+            Expo Go cannot run apps in the background. Open Tuckvault and tap Back up now; keep it open until it is done.
+          </Notice>
+        ) : (
         <Card padded={false}>
           <ToggleRow testID="settings-auto" first icon="sync-outline" title="Back up automatically" value={settings.auto}
                      onChange={(v) => setAuto({ auto: v })}
@@ -89,6 +94,7 @@ export default function Settings() {
           <ToggleRow icon="battery-charging-outline" title="Only while charging" value={settings.chargingOnly} disabled={!settings.auto}
                      onChange={(v) => setAuto({ chargingOnly: v })} />
         </Card>
+        )}
 
         <SectionTitle>Notifications</SectionTitle>
         {!notifications ? (

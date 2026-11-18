@@ -165,3 +165,53 @@ jobs:
           name: ios-screenshots
           path: ios-shots
           if-no-files-found: ignore
+
+  ios-expo-go:
+    name: iOS inside Expo Go, in a simulator
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: mobile
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Tools for the simulator test
+        run: |
+          python -m pip install -r requirements.txt pillow==13.0.0
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Pick a simulator and put Expo Go on it
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k in sorted(d, reverse=True) if 'iOS' in k for x in d[k] if x['name'].startswith('iPhone')))")
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          URL=$(curl -fsSL https://api.expo.dev/v2/versions/latest | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['sdkVersions']['58.0.0']['iosClientUrl'])")
+          mkdir -p "$RUNNER_TEMP/Expo Go.app"
+          curl -fsSL "$URL" | tar -xz -C "$RUNNER_TEMP/Expo Go.app"
+          xcrun simctl install "$UDID" "$RUNNER_TEMP/Expo Go.app"
+      - name: Set up, back up and restore inside Expo Go; the PC restores it too
+        env:
+          PYTHON: python
+          MAESTRO_CLI_NO_ANALYTICS: "1"
+          CI: "1"
+          EXPO_GO_LINK: exp://127.0.0.1:8093
+        run: |
+          (cd mobile && npx expo start --go --port 8093 > "$RUNNER_TEMP/metro.log" 2>&1 &)
+          for _ in $(seq 1 60); do curl -fs http://127.0.0.1:8093/status > /dev/null && break; sleep 2; done
+          # build the bundle once now, so the app does not wait for it
+          curl -fsS -o /dev/null "http://127.0.0.1:8093/node_modules/expo-router/entry.bundle?platform=ios&dev=true&hot=false&lazy=true" || true
+          bash mobile/e2e/run_ios.sh "$PWD/ios-go-shots" || { tail -n 60 "$RUNNER_TEMP/metro.log"; exit 1; }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ios-expo-go-screenshots
+          path: ios-go-shots
+          if-no-files-found: ignore
