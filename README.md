@@ -27,6 +27,13 @@ phone encrypts everything itself, so the computer only stores unreadable data.
 Switch it on in the **Phones** tab, pair the phone by scanning the code shown there,
 and see [mobile/README.md](mobile/README.md) for the rest.
 
+<p>
+<img src="docs/mobile/01-welcome.png" width="190" alt="The phone app's welcome screen">
+<img src="docs/mobile/02b-scanned.png" width="190" alt="The phone app after scanning the pairing code">
+<img src="docs/mobile/04-choose.png" width="190" alt="Choosing what the phone backs up">
+<img src="docs/mobile/07-home-after.png" width="190" alt="The phone app's home screen after a backup">
+</p>
+
 ## Install
 
 Download from the [latest release](https://github.com/karacanil/tuckvault/releases/latest):
@@ -60,6 +67,14 @@ This installs for your user only (no root): the program goes to
 Tuckvault appears in your applications menu. `sh tools/install-linux.sh
 --uninstall` removes it again; settings (`~/.config/tuckvault`) and backups
 stay.
+
+The window is the same as on Windows, drawn in the plain look of Linux's
+Tk toolkit (here on Ubuntu 22.04):
+
+<p>
+<img src="docs/screenshot-linux-backup.png" width="400" alt="The Backup tab on Linux">
+<img src="docs/screenshot-linux-phones.png" width="400" alt="The Phones tab on Linux">
+</p>
 
 Differences from Windows:
 
