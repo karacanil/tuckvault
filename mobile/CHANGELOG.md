@@ -10,6 +10,8 @@
   (**Which photos**, during setup and in Settings). Backups of chosen albums
   are kept apart from backups of the whole library.
 - Copying the recovery key now says that it was copied.
+- The home screen shows how much room is left on the computer for backups
+  (once this phone has a backup there), and points out when it is nearly full.
 - The app now also runs inside Expo Go, which makes it usable on an iPhone
   without a Mac or an Apple developer account: `npm run go` in `mobile/` serves
   it over Tailscale. There the storage format is done in TypeScript with the

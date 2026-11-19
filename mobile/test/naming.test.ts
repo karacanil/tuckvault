@@ -52,3 +52,10 @@ test('the chosen albums are summed up in a few words', async () => {
   assert.equal(albumsSummary([{ title: 'Holiday' }, { title: 'Family' }]), 'Holiday, Family');
   assert.equal(albumsSummary([{ title: 'A' }, { title: 'B' }, { title: 'C' }, { title: 'D' }]), 'A, B and 2 more');
 });
+
+test('the room left on the computer is put in plain words', async () => {
+  const { spaceText } = await import('../src/lib/format.ts');
+  assert.equal(spaceText(412e9, 500e9), '412 GB free of 500 GB on your computer');
+  assert.equal(spaceText(412e9, null), '412 GB free on your computer');
+  assert.match(spaceText(3e9, 500e9), /^3\.0 GB free of 500 GB on your computer\. Nearly full/);
+});

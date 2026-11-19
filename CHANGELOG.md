@@ -3,7 +3,7 @@
 The phone app has its own version numbers and notes: see
 [mobile/CHANGELOG.md](mobile/CHANGELOG.md).
 
-## Unreleased
+## 1.6.0
 
 - Pairing a phone is now one scan. **Pair a phone…** (and `tuckvault phone
   pair`) shows a square code; pointing the phone's camera at it opens the app

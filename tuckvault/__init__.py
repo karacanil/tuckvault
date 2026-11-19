@@ -1,3 +1,3 @@
 """Tuckvault: small encrypted, verified backups to another machine over SSH."""
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
