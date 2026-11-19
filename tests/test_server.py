@@ -294,7 +294,7 @@ class Vault(Base):
         keys, base, _ = self.new_vault()
         name, blob = keys.seal_chunk(b"hello" * 1000)
         status, reply = self.phone.json("PUT", base + "/blobs/" + name, None)
-        status, data = self.phone.call("PUT", base + "/blobs/" + name, blob[:-1] + b"\x00")
+        status, data = self.phone.call("PUT", base + "/blobs/" + name, blob[:-1] + bytes([blob[-1] ^ 1]))
         self.assertEqual((status, json.loads(data)["error"]), (400, "damaged"))
         status, reply = self.phone.json("POST", base + "/verify", {"names": [name], "full": True})
         self.assertEqual(reply["missing"], [name])
