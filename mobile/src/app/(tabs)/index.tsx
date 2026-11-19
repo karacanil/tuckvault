@@ -9,7 +9,8 @@ import { autoBackupPossible, backgroundAllowed } from '../../lib/background';
 import { inExpoGo } from '../../lib/native';
 import { BackupError } from '../../lib/client';
 import type { Result } from '../../lib/engine';
-import { ago, baseName, describeRun, humanSize, plural } from '../../lib/format';
+import { ago, baseName, describeRun, humanSize, LOW_SPACE, plural, spaceText } from '../../lib/format';
+import { albumsSummary } from '../../lib/naming';
 import { autoBlocker, cancel, session, startBackup, useActivity } from '../../lib/runner';
 import { useRunState, useSettings } from '../../lib/store';
 import { Bar, Card, Notice, P, ProgressBar, Row, SectionTitle } from '../../ui/kit';
@@ -18,15 +19,19 @@ import { BRAND_BOTTOM, BRAND_TOP, radius, space, useTheme } from '../../ui/theme
 
 type Reach = { state: 'checking' | 'ok' | 'down'; text: string };
 
-function useReachability(refreshKey: unknown): Reach {
+function useReachability(refreshKey: unknown): Reach & { space: { free: number; total: number | null } | null } {
   const settings = useSettings();
   const [reach, setReach] = useState<Reach>({ state: 'checking', text: 'Checking…' });
+  const [space, setSpace] = useState<{ free: number; total: number | null } | null>(null);
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         const who = await session().client.whoami();
         if (alive) setReach({ state: 'ok', text: 'Connected to ' + (who.name || settings.server?.name || 'your computer') });
+        // How much room is left where the computer keeps this phone's backups (known once there is a backup).
+        const info = await session().client.open(false).catch(() => null);
+        if (alive) setSpace(info && info.free !== null ? { free: info.free, total: info.total } : null);
       } catch (e) {
         if (!alive) return;
         const code = e instanceof BackupError ? e.code : '';
@@ -39,7 +44,7 @@ function useReachability(refreshKey: unknown): Reach {
       alive = false;
     };
   }, [refreshKey, settings.server?.url, settings.server?.name]);
-  return reach;
+  return { ...reach, space };
 }
 
 function headline(last: Result | null, lastSuccess: string | null): { icon: IconName; title: string; tone: 'good' | 'warn' | 'bad' | 'new' } {
@@ -177,6 +182,10 @@ export default function Home() {
             <Row testID="row-computer" first icon="desktop-outline" title="Your computer" detail={reach.text}
                  right={<View style={{ width: 12, height: 12, borderRadius: 6,
                                        backgroundColor: reach.state === 'ok' ? t.good : reach.state === 'down' ? t.bad : t.faint }} />} />
+            {reach.space ? (
+              <Row testID="row-space" icon="server-outline" title="Room for backups"
+                   danger={reach.space.free < LOW_SPACE} detail={spaceText(reach.space.free, reach.space.total)} />
+            ) : null}
             <Row icon="sync-outline" title="Automatic backup"
                  detail={!settings.auto ? 'Off. Tuckvault only backs up when you tap the button.'
                    : blocker === 'waiting for Wi-Fi' ? 'On. Waiting for Wi-Fi.'
@@ -190,7 +199,8 @@ export default function Home() {
           <SectionTitle>What is backed up</SectionTitle>
           <Card padded={false}>
             <Row first icon="images-outline" title="Photos and videos"
-                 detail={settings.photos ? (settings.videos ? 'Everything in your library' : 'Photos only, no videos') : 'Off'}
+                 detail={!settings.photos ? 'Off' : (settings.albums.length ? 'Albums: ' + albumsSummary(settings.albums)
+                   : 'Everything in your library') + (settings.videos ? '' : ', photos only')}
                  onPress={() => router.push('/(tabs)/settings')} />
             <Row icon="folder-outline" title="Files"
                  detail={Platform.OS === 'ios' ? (inExpoGo ? 'Not in the Expo Go version' : settings.inbox ? 'The Tuckvault folder in the Files app' : 'Off')

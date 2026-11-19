@@ -1,5 +1,14 @@
 /** Small helpers for showing numbers, sizes and times. No device code in here. */
 
+/** Below this much free room on the computer, the app points it out (5 GB). */
+export const LOW_SPACE = 5e9;
+
+/** "412 GB free of 500 GB on your computer", and a nudge when it is nearly full. */
+export function spaceText(free: number, total: number | null): string {
+  const text = humanSize(free) + ' free' + (total ? ' of ' + humanSize(total) : '') + ' on your computer';
+  return free < LOW_SPACE ? text + '. Nearly full: make room there soon.' : text;
+}
+
 export function humanSize(bytes: number | null | undefined): string {
   let n = Math.max(0, bytes || 0);
   const units = ['bytes', 'KB', 'MB', 'GB', 'TB'];
