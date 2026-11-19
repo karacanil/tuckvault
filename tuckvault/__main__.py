@@ -58,6 +58,14 @@ def main(argv=None) -> int:
                                           "vaults", "restore"])
     phone.add_argument("value", nargs="?", help="remove: the phone's id. restore: folder to restore into")
     phone.add_argument("--snapshot", default="latest", help="restore: backup name (default: latest)")
+    phone.add_argument("--qr", metavar="FILE", help="pair: save the code to scan as a picture (PNG) "
+                                                    "instead of drawing it in the terminal")
+    phone.add_argument("--show-link", action="store_true",
+                       help="pair: also print the link the scanned code holds. Anyone who sees it can pair "
+                            "a phone while it is valid")
+    phone.add_argument("--link-prefix", metavar="PREFIX",
+                       help="pair: what the scanned link starts with (default: tuckvault://). For the app "
+                            "running inside Expo Go: exp://ADDRESS:PORT/--/")
     args = parser.parse_args(argv)
 
     if args.cmd in (None, "gui"):

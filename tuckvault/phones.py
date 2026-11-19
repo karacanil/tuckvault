@@ -5,7 +5,7 @@ import os
 import sys
 import time
 
-from . import crypto, engine, scheduler, server
+from . import crypto, engine, qr, scheduler, server
 
 
 def status_lines(cfg: dict) -> list:
@@ -80,12 +80,38 @@ def _command(args, cfg, out) -> int:
             out("  tuckvault phone enable     (keeps running, also after a restart)")
             out("  tuckvault serve            (only while this window stays open)")
             return 1
-        out("In the Tuckvault app on your phone, choose Connect and enter:")
         addresses = server.phone_addresses()
-        out("  Address: " + (addresses[0] if addresses else
-                             "(Tailscale is not running on this computer; start it first)"))
-        out("  Code:    " + server.new_pairing_code())
-        out("The code works once and for %d minutes." % server.PAIR_MINUTES)
+        if not addresses:
+            out("Tailscale is not running on this computer, so a phone elsewhere cannot reach it. "
+                "Start Tailscale and sign in, then pair again.")
+            addresses = ["http://127.0.0.1:%d" % server.port()]  # only something on this computer itself
+        pairing = server.new_pairing()
+        link = server.pairing_link(addresses[0], pairing["token"], args.link_prefix or server.APP_LINK)
+        drawn = None
+        if args.qr:
+            if qr.save_png(link, args.qr):
+                out("The code to scan was saved as a picture: " + args.qr)
+                out("Anyone who has that picture can pair a phone for the next %d minutes. Delete it afterwards."
+                    % server.PAIR_MINUTES)
+            else:
+                out("The picture could not be made: install the 'segno' package (pip install segno).")
+        else:
+            drawn = qr.terminal(link)
+            try:  # when the output is not a terminal that can show the blocks, leave the drawing out
+                (drawn or "").encode(getattr(sys.stdout, "encoding", None) or "utf-8")
+            except (UnicodeEncodeError, LookupError):
+                drawn = None
+                out("(The code to scan cannot be drawn here. Use --qr FILE to save it as a picture.)")
+        if drawn:
+            out("Scan this with your phone's camera (Tailscale switched on on both):\n")
+            out(drawn)
+            out("")
+        out("%s in the Tuckvault app, choose Connect and type:" % ("Or" if drawn or args.qr else "On your phone,"))
+        out("  Address: " + addresses[0])
+        out("  Code:    " + pairing["code"])
+        if args.show_link:
+            out("  Link:    " + link)
+        out("Each works once, for %d minutes. Starting pairing again cancels this one." % server.PAIR_MINUTES)
         return 0
     if action == "list":
         devices = server.load()["devices"]

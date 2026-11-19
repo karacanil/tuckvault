@@ -1,6 +1,8 @@
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Linking, Platform, View } from 'react-native';
 
+import { albumsSummary } from '../lib/naming';
 import { inExpoGo } from '../lib/native';
 import { askPhotoAccess, photoAccess, photosPossible, pickFolder } from '../lib/sources';
 import type { PhotoAccess } from '../lib/sources';
@@ -59,10 +61,15 @@ export function SourcesEditor() {
       ) : null}
       <Card padded={false}>
         <ToggleRow testID="toggle-photos" first icon="images-outline" title="Photos" value={photosOn} onChange={togglePhotos}
-                   detail="Every photo on this phone, as the camera saved it." />
+                   detail={settings.albums.length ? 'Only the albums chosen below, as the camera saved them.'
+                     : 'Every photo on this phone, as the camera saved it.'} />
         <ToggleRow testID="toggle-videos" icon="videocam-outline" title="Videos" value={photosOn && settings.videos}
                    disabled={!photosOn} onChange={(v) => updateSettings({ videos: v })}
                    detail="Videos are large; the first backup can take a while." />
+        {photosOn ? (
+          <Row testID="choose-albums" icon="albums-outline" title="Which photos" detail={albumsSummary(settings.albums)}
+               onPress={() => router.push('/albums')} />
+        ) : null}
       </Card>
       {settings.photos && access === 'limited' ? (
         <View style={{ marginTop: space.md }}>

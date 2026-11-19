@@ -62,8 +62,17 @@ be switched off on the Security tab. Scheduled backups never do it.
 - The receiving service (`tuckvault serve`) listens on the computer itself
   and on its Tailscale address only. It speaks plain HTTP: privacy on the way
   comes from Tailscale, which encrypts everything between its devices.
-- A phone is paired with a one-time code (8 characters, valid ten minutes,
-  five attempts). The reply carries that phone's own secret; afterwards every
+- A phone is paired once, in one of two ways, both valid for 30 minutes and
+  for one phone only. Scanning the square code the computer shows hands the
+  app a link with the computer's address and a random 32-character token
+  (about 158 bits). Or the address and a short code (8 characters, five
+  attempts) are typed. The computer keeps only hashes of both. Wrong short
+  codes cancel the short code, not the scanned one, so somebody guessing
+  cannot stop you from pairing. Starting a new pairing cancels the one before.
+  The app never pairs by itself when such a link is opened: it shows the
+  computer's address and waits for a tap. Treat a picture of the code like a
+  password until it is used or has expired.
+- The reply to pairing carries that phone's own secret; afterwards every
   request is signed with it and the secret is never sent again.
 - What a paired phone can do: store, read and delete data in phone vaults on
   that computer. It cannot read another vault without that vault's key, and it

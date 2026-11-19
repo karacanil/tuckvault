@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Connecting to the computer is now one scan: point the phone's camera at the
+  code Tuckvault shows on the computer, check the address the app shows, and
+  tap **Connect to this computer**. Typing the address and code still works.
+- Clearer messages when a code has expired, was already used or was mistyped.
+- Choose which photos are backed up: everything, or only the albums you tick
+  (**Which photos**, during setup and in Settings). Backups of chosen albums
+  are kept apart from backups of the whole library.
+- Copying the recovery key now says that it was copied.
 - The app now also runs inside Expo Go, which makes it usable on an iPhone
   without a Mac or an Apple developer account: `npm run go` in `mobile/` serves
   it over Tailscale. There the storage format is done in TypeScript with the

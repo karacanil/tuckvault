@@ -27,8 +27,13 @@ export default function RecoveryKey() {
       )}
       {shown ? (
         <View style={{ marginTop: space.md }}>
-          <Button title={copied ? 'Copied' : 'Copy'} icon="copy-outline" kind="secondary"
+          <Button title={copied ? 'Copied' : 'Copy'} icon={copied ? 'checkmark-circle' : 'copy-outline'} kind="secondary"
                   onPress={async () => { await Clipboard.setStringAsync(key); setCopied(true); }} />
+          {copied ? (
+            <P muted small style={{ marginTop: space.sm, textAlign: 'center' }}>
+              Copied. Paste it into your password manager or notes now.
+            </P>
+          ) : null}
         </View>
       ) : null}
       <View style={{ marginTop: space.xl }}>

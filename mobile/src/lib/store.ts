@@ -12,6 +12,8 @@ import type { Cache, Result } from './engine';
 import { dataDir } from './device';
 
 export type Folder = { uri: string; name: string };
+/** A photo album on this phone, as the user chose it. */
+export type ChosenAlbum = { id: string; title: string };
 
 export type Settings = {
   /** The computer this phone is paired with. The secret is kept apart, in secure storage. */
@@ -20,6 +22,8 @@ export type Settings = {
   recoveryKeySaved: boolean;
   photos: boolean;
   videos: boolean;
+  /** Back up only these albums. Empty: the whole photo library. */
+  albums: ChosenAlbum[];
   /** Android: folders the user picked. iOS: the Tuckvault folder in the Files app is always the one folder. */
   folders: Folder[];
   /** iOS: back up what is put into the Tuckvault folder in the Files app. */
@@ -56,6 +60,7 @@ export const DEFAULT_SETTINGS: Settings = {
   recoveryKeySaved: false,
   photos: true,
   videos: true,
+  albums: [],
   folders: [],
   inbox: true,
   auto: true,

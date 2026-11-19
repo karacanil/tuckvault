@@ -81,7 +81,11 @@ find "$HOME/.maestro/tests" -path "*takeScreenshot*" -name "ios-*.png" ! -name "
   -exec cp {} "$SHOTS/" \; 2>/dev/null || true
 
 echo "[e2e] the PC restores the phone's backup with the recovery key the app showed"
-KEY=$(xcrun simctl pbpaste "$SIM_UDID")
+KEY=""
+for attempt in 1 2 3 4 5; do  # reading the simulator's clipboard sometimes times out
+  KEY=$(xcrun simctl pbpaste "$SIM_UDID") && test -n "$KEY" && break
+  sleep 5
+done
 # (kept simple on purpose: the bash that ships with macOS is old)
 KEY_LENGTH=$(printf %s "$KEY" | tr -d - | wc -c | tr -d " ")
 test "$KEY_LENGTH" = 56

@@ -16,9 +16,19 @@ export default function Key() {
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const fresh = useMemo(() => Native.newMasterKey(), []);
   const [saved, setSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function copy() {
+    try {
+      await Clipboard.setStringAsync(Native.encodeRecoveryKey(fresh));
+      setCopied(true);
+    } catch {
+      Alert.alert('Could not copy', 'Write the key down instead.');
+    }
+  }
 
   function useNew() {
     setMasterKey(fresh);
@@ -90,8 +100,13 @@ export default function Key() {
       </P>
       <KeyBox value={Native.encodeRecoveryKey(fresh)} />
       <View style={{ height: space.md }} />
-      <Button title="Copy" icon="copy-outline" kind="secondary"
-              onPress={() => Clipboard.setStringAsync(Native.encodeRecoveryKey(fresh))} />
+      <Button testID="copy-key" title={copied ? 'Copied' : 'Copy'} icon={copied ? 'checkmark-circle' : 'copy-outline'}
+              kind="secondary" onPress={copy} />
+      {copied ? (
+        <P testID="key-copied" muted small style={{ marginTop: space.sm, textAlign: 'center' }}>
+          Copied. Paste it into your password manager or notes now.
+        </P>
+      ) : null}
       <View style={{ marginVertical: space.lg }}>
         <Notice kind="warn" title="Keep it somewhere safe, away from this phone">
           A password manager or a piece of paper works well. Nobody can reset it for you, and without it the

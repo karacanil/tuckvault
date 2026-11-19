@@ -95,7 +95,7 @@ jobs:
           profile: pixel_7
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: python mobile/e2e/run_android.py --apk mobile/android/app/build/outputs/apk/release/app-release.apk --shots e2e-shots
+          script: python mobile/e2e/run_android.py --scan --apk mobile/android/app/build/outputs/apk/release/app-release.apk --shots e2e-shots
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
