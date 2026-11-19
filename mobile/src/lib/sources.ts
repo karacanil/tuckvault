@@ -4,14 +4,14 @@
  */
 
 import { Directory, File, Paths } from 'expo-file-system';
-import { Asset, AssetField, MediaType, Query, getPermissionsAsync, requestPermissionsAsync } from 'expo-media-library';
+import { Album, Asset, AssetField, MediaType, Query, getPermissionsAsync, requestPermissionsAsync } from 'expo-media-library';
 import { Platform as RN } from 'react-native';
 
 import { tmpDir } from './device';
 import Native, { inExpoGo } from './native';
 import type { Item } from './engine';
 import { clean, photoPath, toMs } from './naming';
-import type { Folder, Settings } from './store';
+import type { ChosenAlbum, Folder, Settings } from './store';
 
 const PAGE = 500;
 
@@ -71,6 +71,26 @@ async function iosPhoto(id: string): Promise<string> {
   }
 }
 
+export type AlbumChoice = { id: string; title: string; count: number | null };
+
+/** The albums on this phone, the user's own first, each with how many items it holds. */
+export async function listAlbums(): Promise<AlbumChoice[]> {
+  const found = await Album.getAlbumsMetadata();
+  const out: (AlbumChoice & { own: boolean })[] = [];
+  for (const album of found) {
+    let count: number | null = null;
+    try {
+      count = await new Album(album.id).getAssetCount();
+    } catch {
+      // shown without a number
+    }
+    if (count === 0) continue;
+    out.push({ id: album.id, title: album.title || 'Untitled album', count, own: album.type !== 'smartAlbum' });
+  }
+  out.sort((a, b) => Number(b.own) - Number(a.own) || a.title.localeCompare(b.title));
+  return out.map(({ id, title, count }) => ({ id, title, count }));
+}
+
 async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
   const access = await photoAccess();
   if (access === 'none' || access === 'ask') {
@@ -80,11 +100,33 @@ async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
   }
   // With access to selected photos only, what is seen is not the library. It is kept as a source
   // of its own, so these smaller backups never count against (and push out) backups of everything.
-  const source = access === 'limited' ? 'Photos (selected)' : 'Photos';
-  out.sources.push(source);
+  // The same goes for chosen albums: they are backed up as a source of their own.
+  const chosen = settings.albums || [];
+  const source = chosen.length ? 'Photos (albums)' : access === 'limited' ? 'Photos (selected)' : 'Photos';
+  const seen = new Set<string>(); // a photo can be in several albums
+  let readable = 0;
+  for (const album of chosen.length ? chosen : [null]) {
+    try {
+      await scanAssets(settings, source, album, seen, out);
+      readable += 1;
+    } catch (e) {
+      if (!album) throw e;
+      out.warnings.push('The album "' + album.title + '" could not be read, so it was not backed up. ' +
+        'If it was deleted, choose the albums again in Settings.');
+    }
+  }
+  if (readable) out.sources.push(source); // otherwise the backups already made are kept as they are
+}
+
+async function scanAssets(settings: Settings, source: string, album: ChosenAlbum | null, seen: Set<string>,
+                          out: Scan): Promise<void> {
+  const found: Item[] = [];
+  let photos = 0;
+  let videos = 0;
   for (let offset = 0; ; offset += PAGE) {
-    const page = await new Query().orderBy({ key: AssetField.CREATION_TIME, ascending: true })
-      .limit(PAGE).offset(offset).exeForMetadata();
+    let query = new Query().orderBy({ key: AssetField.CREATION_TIME, ascending: true });
+    if (album) query = query.album(new Album(album.id));
+    const page = await query.limit(PAGE).offset(offset).exeForMetadata();
     for (const asset of page) {
       const video = asset.mediaType === MediaType.VIDEO;
       if (!video && asset.mediaType !== MediaType.IMAGE) continue;
@@ -93,7 +135,9 @@ async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
       // Pictures that were copied onto the phone often carry no "taken" time; file them by their file time.
       const created = toMs(asset.creationTime) || changed;
       const id = asset.id;
-      out.items.push({
+      if (seen.has(id)) continue;
+      seen.add(id);
+      found.push({
         key: 'photo:' + id,
         source,
         path: photoPath(asset.filename, id, created),
@@ -102,11 +146,15 @@ async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
         size: null,
         mtime: changed || created,
       });
-      if (video) out.videos += 1;
-      else out.photos += 1;
+      if (video) videos += 1;
+      else photos += 1;
     }
     if (page.length < PAGE) break;
   }
+  // Only now, so an album that fails halfway adds nothing.
+  out.items.push(...found);
+  out.photos += photos;
+  out.videos += videos;
 }
 
 /** The name a folder's files are filed under: "Files/<name>". */

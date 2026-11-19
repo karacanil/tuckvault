@@ -44,3 +44,11 @@ test('numbers and times read naturally', () => {
   assert.equal(baseName('Photos/2026/11/a.jpg'), 'a.jpg');
   assert.match(describeRun({ kind: 'backup', status: 'failed', finished: new Date().toISOString() }), /^Backup did not work, just now$/);
 });
+
+test('the chosen albums are summed up in a few words', async () => {
+  const { albumsSummary } = await import('../src/lib/naming.ts');
+  assert.equal(albumsSummary([]), 'All photos');
+  assert.equal(albumsSummary([{ title: 'Holiday' }]), 'Holiday');
+  assert.equal(albumsSummary([{ title: 'Holiday' }, { title: 'Family' }]), 'Holiday, Family');
+  assert.equal(albumsSummary([{ title: 'A' }, { title: 'B' }, { title: 'C' }, { title: 'D' }]), 'A, B and 2 more');
+});

@@ -12,6 +12,13 @@ export function clean(name: string): string {
   return out === '' || out === '.' || out === '..' ? '_' : out;
 }
 
+/** What the photo setting covers, in a few words: "All photos" or the names of the chosen albums. */
+export function albumsSummary(albums: { title: string }[]): string {
+  if (!albums.length) return 'All photos';
+  const names = albums.slice(0, 2).map((a) => a.title).join(', ');
+  return albums.length > 2 ? names + ' and ' + (albums.length - 2) + ' more' : names;
+}
+
 /** "Photos/2026/11/IMG_0001.jpg" from when the picture was taken. */
 export function photoPath(filename: string | null, id: string, created: number): string {
   const name = clean(filename || 'item-' + id.replace(/[^0-9A-Za-z]/g, '').slice(-12));

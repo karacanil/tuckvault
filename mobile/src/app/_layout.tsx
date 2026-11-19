@@ -43,6 +43,7 @@ export default function Layout() {
         <Stack.Screen name="connect" options={{ title: 'Connect to your computer' }} />
         <Stack.Screen name="key" options={{ title: 'Your backup key' }} />
         <Stack.Screen name="choose" options={{ title: 'What to back up' }} />
+        <Stack.Screen name="albums" options={{ title: 'Which photos' }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="backup/[name]" options={{ title: 'Backup' }} />
         <Stack.Screen name="recovery-key" options={{ title: 'Recovery key' }} />
