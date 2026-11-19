@@ -54,6 +54,28 @@ export function scannedPairing(u: unknown, c: unknown): ScannedPairing | null {
   }
 }
 
+/**
+ * The same, read straight from a link the phone was opened with. The router does not always
+ * hand a link's details to the screen (inside Expo Go on an iPhone it drops them), so the app
+ * also looks at the link itself.
+ */
+export function pairingParams(link: unknown): { u: string; c: string } | null {
+  if (typeof link !== 'string' || link.length > 1000) return null;
+  const m = /\/connect\/?\?([^#]*)/.exec(link);
+  if (!m) return null;
+  const found: Record<string, string> = {};
+  for (const part of m[1].split('&')) {
+    const at = part.indexOf('=');
+    if (at < 1) continue;
+    try {
+      found[part.slice(0, at)] = decodeURIComponent(part.slice(at + 1));
+    } catch {
+      return null;
+    }
+  }
+  return scannedPairing(found.u, found.c) ? { u: found.u, c: found.c } : null;
+}
+
 function parse(reply: HttpReply): any {
   try {
     return JSON.parse(reply.text);

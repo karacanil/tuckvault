@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 
-import { BackupError, Client, hello, normalizeAddress, pair, scannedPairing } from '../src/lib/client.ts';
+import { BackupError, Client, hello, normalizeAddress, pair, pairingParams, scannedPairing } from '../src/lib/client.ts';
 import type { Server } from '../src/lib/client.ts';
 import { CHUNK, listBackups, manifest, restoreFile, runBackup, runVerify, tuning } from '../src/lib/engine.ts';
 import type { BackupOptions, Cache, Item, Session } from '../src/lib/engine.ts';
@@ -429,4 +429,17 @@ test('a phone that was removed on the computer, or whose clock is wrong, is told
   const gone = await p.backup();
   assert.equal(gone.status, 'failed');
   assert.equal(gone.code, 'not_paired');
+});
+
+test('the pairing details are read from the link itself, as scanned', () => {
+  const c = 'A'.repeat(32);
+  const want = { u: 'http://pc.tail1234.ts.net:8743', c };
+  const q = 'connect?u=http%3A%2F%2Fpc.tail1234.ts.net%3A8743&c=' + c;
+  assert.deepEqual(pairingParams('tuckvault://' + q), want);
+  assert.deepEqual(pairingParams('exp://100.101.102.103:8093/--/' + q), want);
+  assert.equal(pairingParams('exp://100.101.102.103:8093/--/' + q.replace('connect', 'history')), null);
+  assert.equal(pairingParams('tuckvault://connect?u=http%3A%2F%2Fpc.ts.net&c=short'), null);
+  assert.equal(pairingParams('tuckvault://connect?u=%E0%A4%A&c=' + c), null);
+  assert.equal(pairingParams('tuckvault://connect'), null);
+  assert.equal(pairingParams(null), null);
 });
