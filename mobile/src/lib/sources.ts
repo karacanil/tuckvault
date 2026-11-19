@@ -71,12 +71,25 @@ async function iosPhoto(id: string): Promise<string> {
   }
 }
 
-export type AlbumChoice = { id: string; title: string; count: number | null };
+export type AlbumChoice = { id: string; title: string; count: number | null; own: boolean };
 
-/** The albums on this phone, the user's own first, each with how many items it holds. */
+/**
+ * The albums on this phone, the user's own first, each with how many items it holds. On an iPhone
+ * also the ones the phone keeps by itself, such as Favorites and Screenshots.
+ */
 export async function listAlbums(): Promise<AlbumChoice[]> {
-  const found = await Album.getAlbumsMetadata();
-  const out: (AlbumChoice & { own: boolean })[] = [];
+  const found: { id: string; title: string; type: string | null }[] = await Album.getAlbumsMetadata();
+  if (RN.OS === 'ios') {
+    try {
+      for (const album of await Album.getSmartAlbums()) {
+        if (found.some((f) => f.id === album.id)) continue;
+        found.push({ id: album.id, title: await album.getTitle().catch(() => ''), type: 'smartAlbum' });
+      }
+    } catch {
+      // only the user's own albums are offered
+    }
+  }
+  const out: AlbumChoice[] = [];
   for (const album of found) {
     let count: number | null = null;
     try {
@@ -88,7 +101,7 @@ export async function listAlbums(): Promise<AlbumChoice[]> {
     out.push({ id: album.id, title: album.title || 'Untitled album', count, own: album.type !== 'smartAlbum' });
   }
   out.sort((a, b) => Number(b.own) - Number(a.own) || a.title.localeCompare(b.title));
-  return out.map(({ id, title, count }) => ({ id, title, count }));
+  return out;
 }
 
 async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
