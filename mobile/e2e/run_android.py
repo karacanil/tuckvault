@@ -271,7 +271,7 @@ def main():
         d.wait_for("toggle-photos")
         if not args.expo_go:  # on Android, Expo Go is not allowed to see the photo library
             d.tap("toggle-photos")
-            allow_system_dialog(d)
+            allow_system_dialog(d, timeout=40)  # a busy emulator shows the question late
             time.sleep(1)
         log("setup: add a folder with Android's folder picker")
         d.scroll_to("add-folder")
