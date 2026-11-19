@@ -7,6 +7,7 @@ is sent, in the same format the PC program uses, and travels over your private
 
 <p>
 <img src="../docs/mobile/01-welcome.png" width="200" alt="Welcome screen">
+<img src="../docs/mobile/02b-scanned.png" width="200" alt="After scanning the pairing code">
 <img src="../docs/mobile/06-backing-up.png" width="200" alt="A backup in progress">
 <img src="../docs/mobile/07-home-after.png" width="200" alt="Home screen after a backup">
 <img src="../docs/mobile/10-backup-files.png" width="200" alt="Files in a backup">
