@@ -50,5 +50,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p test",
     "test": "node --test --experimental-strip-types --disable-warning=ExperimentalWarning test/vectors.test.ts test/vaultjs.test.ts test/naming.test.ts test/engine.test.ts"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "minimatch": "^11.0.1"
+  }
 }

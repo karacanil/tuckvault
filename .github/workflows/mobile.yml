@@ -206,8 +206,12 @@ jobs:
         run: |
           (cd mobile && npx expo start --go --port 8093 > "$RUNNER_TEMP/metro.log" 2>&1 &)
           for _ in $(seq 1 60); do curl -fs http://127.0.0.1:8093/status > /dev/null && break; sleep 2; done
-          # build the bundle once now, so the app does not wait for it
-          curl -fsS -o /dev/null "http://127.0.0.1:8093/node_modules/expo-router/entry.bundle?platform=ios&dev=true&hot=false&lazy=true" || true
+          # Build the very bundle the app will ask for now (its address is in the manifest). Expo Go gives up
+          # on a bundle that takes minutes, and one built with other options is of no use to it.
+          BUNDLE=$(curl -fsS -H "expo-platform: ios" -H "accept: application/expo+json,application/json" http://127.0.0.1:8093/ | python3 -c "import re,sys; m = re.search(r'\"url\":\"(http[^\"]*entry\.bundle[^\"]*)\"', sys.stdin.read()); print(m.group(1) if m else '')" || true)
+          [ -n "$BUNDLE" ] || BUNDLE="http://127.0.0.1:8093/node_modules/expo-router/entry.bundle?platform=ios&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.bytecode=1&transform.routerRoot=src%2Fapp&unstable_transformProfile=hermes-stable"
+          echo "building $BUNDLE"
+          curl -fsS -m 900 -o /dev/null "$BUNDLE" || true
           bash mobile/e2e/run_ios.sh "$PWD/ios-go-shots" || { tail -n 60 "$RUNNER_TEMP/metro.log"; exit 1; }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
