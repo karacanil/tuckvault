@@ -631,7 +631,10 @@ def _prune(repo: Repo, keep_last: int, progress=None, protect: str = None):
                 m = repo.manifest(name)
                 # Older backups list every item that was selected, found or not,
                 # so look at what each really holds.
-                items = sorted(_items_present(m.get("sources") or [], m.get("files") or []))                     if m.get("sources") else [""]
+                listed = m.get("sources") or []
+                # If no file matches any listed item (paths written on another
+                # system, say), count it as before rather than lose it.
+                items = sorted(_items_present(listed, m.get("files") or [])) or listed or [""]
             except crypto.IntegrityError:
                 if pos < keep_last:  # unreadable ones only age out
                     keep.add(name)

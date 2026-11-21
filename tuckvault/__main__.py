@@ -168,7 +168,7 @@ def main(argv=None) -> int:
                      "add --replace after the key.")
                 return 1
             keystore.import_recovery_key(args.value)
-        except ValueError as e:
+        except (ValueError, OSError) as e:
             _out(str(e))
             return 1
         _out("Key imported.")

@@ -114,6 +114,10 @@ export async function startBackup(background = false): Promise<Result | null> {
     const settings = getSettings();
     const found = await scan(settings);
     set({ scanning: false });
+    if (!found.items.length && found.left.length) {
+      // Everything chosen was left out (say, the one album is gone): say why, not "nothing selected".
+      throw new BackupError('left_out', found.left[0]);
+    }
     const state = getState();
     const scrubDue = !state.lastScrub || Date.now() - Date.parse(state.lastScrub) > SCRUB_EVERY_DAYS * 86400_000;
     let last = 0;

@@ -149,9 +149,9 @@ async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
   }
 }
 
-/** The name a chosen album's photos are filed under for keeping old backups: "Photos/<album>". */
+/** The name a chosen album's photos are kept under for keeping old backups: "Photos (album: <name>)". */
 export function albumSource(album: ChosenAlbum): string {
-  return 'Photos/' + clean(album.title || 'Album');
+  return 'Photos (album: ' + clean(album.title || 'Untitled') + ')';
 }
 
 function leaveOut(out: Scan, text: string) {
