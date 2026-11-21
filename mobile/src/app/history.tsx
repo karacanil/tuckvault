@@ -20,7 +20,7 @@ function Entry({ r }: { r: Result }) {
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
         <Ionicons name={ok ? 'checkmark-circle' : r.status === 'failed' ? 'close-circle' : 'alert-circle'} size={22} color={color} />
         <Text style={{ color: t.text, fontSize: 16, fontWeight: '600', marginLeft: space.sm, flex: 1 }}>
-          {WHAT[r.kind]}: {HOW[r.status]}
+          {WHAT[r.kind]}: {r.status === 'warning' && r.left?.length ? 'Finished, but not everything was backed up' : HOW[r.status]}
         </Text>
       </View>
       <P muted small style={{ marginTop: 4 }}>{localDateTime(r.finished)}</P>

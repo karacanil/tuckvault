@@ -61,9 +61,10 @@ export function baseName(path: string): string {
 }
 
 /** "Backup finished, 2 hours ago" for a run's result. */
-export function describeRun(r: { kind: string; status: string; finished: string }): string {
+export function describeRun(r: { kind: string; status: string; finished: string; left?: string[] }): string {
   const what = r.kind === 'verify' ? 'Check' : r.kind === 'restore' ? 'Restore' : 'Backup';
   const how: Record<string, string> = { success: 'finished', warning: 'finished with skipped files', failed: 'did not work',
                                         partial: 'not finished', cancelled: 'stopped' };
+  if (r.status === 'warning' && r.left?.length) return what + ' finished, but not everything was backed up, ' + ago(r.finished);
   return what + ' ' + (how[r.status] || r.status) + ', ' + ago(r.finished);
 }

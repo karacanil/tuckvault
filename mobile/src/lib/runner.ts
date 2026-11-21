@@ -140,6 +140,7 @@ export async function startBackup(background = false): Promise<Result | null> {
       result.warnings = [...found.warnings, ...result.warnings].slice(0, 50);
       if (result.status === 'success') result.status = 'warning';
     }
+    if (found.left.length) result.left = found.left;
     if (result.scrubbed) updateState({ lastScrub: result.finished });
   } catch (e) {
     result = failed('backup', e);

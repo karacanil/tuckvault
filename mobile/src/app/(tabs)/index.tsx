@@ -35,7 +35,7 @@ function useReachability(refreshKey: unknown): Reach & { space: { free: number; 
       } catch (e) {
         if (!alive) return;
         const code = e instanceof BackupError ? e.code : '';
-        setReach({ state: 'down', text: code === 'not_paired' ? 'This phone was removed on the computer. Connect again in Settings.'
+        setReach({ state: 'down', text: code === 'not_paired' ? 'This phone was removed on the computer. Pair it again: Settings, Connect again.'
           : code === 'clock' ? 'The clock on this phone or the computer is wrong.'
           : 'Cannot reach ' + (settings.server?.name || 'your computer') + ' right now' });
       }
@@ -57,6 +57,7 @@ function headline(last: Result | null, lastSuccess: string | null): { icon: Icon
   if (last && last.kind === 'backup' && last.status === 'failed') return { icon: 'alert-circle', title: 'The last backup did not work', tone: 'bad' };
   if (last && last.kind === 'verify' && last.status === 'failed') return { icon: 'alert-circle', title: 'A check found a problem', tone: 'bad' };
   if (days > 7) return { icon: 'alert-circle', title: 'No backup for ' + Math.floor(days) + ' days', tone: 'warn' };
+  if (last && last.status === 'warning' && last.left?.length) return { icon: 'alert-circle', title: 'Not everything was backed up', tone: 'warn' };
   if (last && last.status === 'warning') return { icon: 'shield-checkmark', title: 'Backed up, with a few files skipped', tone: 'warn' };
   return { icon: 'shield-checkmark', title: 'Your phone is backed up', tone: 'good' };
 }
@@ -166,7 +167,7 @@ export default function Home() {
             <View style={{ marginBottom: space.md }}>
               <Notice testID="last-warnings" kind="warn" title={plural(last.warnings.length, 'thing') + ' to know about the last backup'}
                       action="Show" onAction={() => router.push('/history')}>
-                {last.warnings[0]}
+                {last.left?.[0] || last.warnings[0]}
               </Notice>
             </View>
           ) : null}

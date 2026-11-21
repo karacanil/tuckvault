@@ -43,6 +43,8 @@ test('numbers and times read naturally', () => {
   assert.equal(ago(new Date(now - 4 * 86400_000).toISOString(), now), '4 days ago');
   assert.equal(baseName('Photos/2026/11/a.jpg'), 'a.jpg');
   assert.match(describeRun({ kind: 'backup', status: 'failed', finished: new Date().toISOString() }), /^Backup did not work, just now$/);
+  assert.match(describeRun({ kind: 'backup', status: 'warning', finished: new Date().toISOString(), left: ['x'] }),
+               /^Backup finished, but not everything was backed up, just now$/);
 });
 
 test('the chosen albums are summed up in a few words', async () => {

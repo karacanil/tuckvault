@@ -140,6 +140,9 @@ export default function Settings() {
         <Card padded={false}>
           <Row first icon="desktop-outline" title={settings.server?.name || 'Not connected'} detail={settings.server?.url} />
           <Row icon="phone-portrait-outline" title="This phone" detail={settings.deviceName} />
+          <Row testID="reconnect" icon="link-outline" title="Connect again"
+               detail="Pair with a new code from the computer, for example after this phone was removed there. The recovery key stays the same."
+               onPress={() => router.push('/connect')} />
           <Row testID="disconnect" icon="log-out-outline" danger title="Disconnect this phone" onPress={disconnect} />
         </Card>
 

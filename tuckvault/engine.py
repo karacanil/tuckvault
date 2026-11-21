@@ -379,13 +379,33 @@ def run_backup(cfg: dict = None, progress=None, attempts: int = 1,
             config.record_run(result)
             if result["status"] in ("success", "warning"):
                 from . import watch
-                watch.note_success(result.get("sources"), result["finished"])
+                watch.note_success(result.get("backed_up", result.get("sources")),
+                                   result["finished"])
         except OSError:
             log.exception("could not write the run history")
     log.info("backup finished: %s %s", result["status"], result.get("error", ""))
     for w in result["warnings"]:
         log.warning("%s", w)
     return result
+
+
+def _items_present(sources, entries) -> set:
+    """The sources that at least one of the backed-up file entries lies under."""
+    roots = {os.path.normcase(os.path.abspath(s)): s for s in sources}
+    found, seen = set(), set()
+    for e in entries:
+        p = os.path.normcase(e["p"])
+        while p not in seen:  # files come sorted, so each folder is looked at once
+            seen.add(p)
+            if p in roots:
+                found.add(roots[p])
+            parent = os.path.dirname(p)
+            if parent == p:
+                break
+            p = parent
+        if len(found) == len(roots):
+            break
+    return found
 
 
 def _under(path: str, roots) -> bool:
@@ -469,11 +489,20 @@ def _backup(cfg, sources, result, progress, attempts):
         if not entries:
             raise BackupError("No file could be read. " + (warnings[0] if warnings else ""))
 
+        # Only items that really have something in this backup count as backed up:
+        # an unplugged drive must neither use up its item's "keep the last" places
+        # nor tell the overdue check that it was backed up.
+        backed_up = [s for s in sources if s in _items_present(sources, entries)]
+        result["backed_up"] = backed_up
+        for s in reversed([s for s in sources if s not in backed_up]):
+            warnings.insert(0, f"Nothing from {s} was backed up this time; its earlier backups "
+                               "are being kept.")
+
         # Names sort chronologically; microseconds keep quick successive runs in order.
         snap_name = (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
                      + "-" + secrets.token_hex(3) + ".snap")
         manifest = {"v": 1, "name": snap_name, "created": now_iso(), "host": platform.node(),
-                    "sources": sources,
+                    "sources": backed_up,
                     "files": entries, "stats": {"files": result["files"], "bytes": result["bytes"]},
                     "warnings": warnings[:50]}
         raw = keys.seal_snapshot(manifest)
@@ -599,7 +628,10 @@ def _prune(repo: Repo, keep_last: int, progress=None, protect: str = None):
         keep, count = ({protect} if protect else set()), {}
         for pos, name in enumerate(reversed(names)):
             try:
-                items = repo.manifest(name).get("sources") or [""]
+                m = repo.manifest(name)
+                # Older backups list every item that was selected, found or not,
+                # so look at what each really holds.
+                items = sorted(_items_present(m.get("sources") or [], m.get("files") or []))                     if m.get("sources") else [""]
             except crypto.IntegrityError:
                 if pos < keep_last:  # unreadable ones only age out
                     keep.add(name)

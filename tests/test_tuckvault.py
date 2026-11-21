@@ -216,6 +216,23 @@ class Protection(Base):
         self.assertEqual(res["status"], "success", res)
         self.assert_same_tree(restored)
 
+    def test_importing_a_different_key_needs_replace(self):
+        import contextlib
+        import io
+        from tuckvault import __main__ as cli
+        self.backup()
+        mine = keystore.recovery_key()
+        other = crypto.encode_recovery_key(crypto.new_master_key())
+        self.assertFalse(keystore.would_replace(mine))
+        self.assertTrue(keystore.would_replace(other))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(cli.main(["key", "import", other]), 1)
+        self.assertIn("--replace", out.getvalue())
+        self.assertEqual(keystore.recovery_key(), mine)  # untouched
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["key", "import", other, "--replace"]), 0)
+        self.assertEqual(keystore.recovery_key(), other)
+
     def test_recovery_key_typo_is_caught(self):
         key = crypto.encode_recovery_key(crypto.new_master_key())
         bad = ("B" if key[0] != "B" else "C") + key[1:]
@@ -249,6 +266,31 @@ class Retention(Base):
         for snap in snaps[-2:]:
             res, _ = self.restore(snap, "r-" + snap[-11:-5])
             self.assertEqual(res["status"], "success", res)
+
+    def test_missing_item_keeps_its_last_backups(self):
+        # A second folder (say, on a USB drive) is backed up once, then goes missing.
+        drive = self.tmp / "usb"
+        drive.mkdir()
+        (drive / "photo.jpg").write_bytes(b"only copy")
+        self.cfg["sources"].append(str(drive))
+        self.cfg["keep_last"] = 2
+        first = self.backup()
+        with_drive = first["snapshot"]
+        shutil.rmtree(drive)
+        for i in range(4):
+            (self.src / "a.txt").write_bytes(b"edit %d" % i)
+            r = self.backup(expect="warning")
+            self.assertIn(str(drive), r["warnings"][0])
+            self.assertEqual(r["backed_up"], [str(self.src)])
+        snaps = {s["name"]: s for s in engine.list_snapshots(self.cfg)}
+        self.assertIn(with_drive, snaps)
+        self.assertEqual(len(snaps), 3)  # the drive's last one, plus the newest two
+        self.assertEqual(snaps[r["snapshot"]]["sources"], [str(self.src)])
+        from tuckvault import watch
+        table = config.load_state()["last_success_by_source"]
+        self.assertEqual(table[watch._key(str(drive))], first["finished"])  # so it shows as overdue
+        res, restored = self.restore(with_drive, "usb-back")
+        self.assertEqual(res["status"], "success", res)
 
 
 class UntrustedStorage(Base):
