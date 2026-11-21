@@ -64,6 +64,10 @@ async function show(title: string, body: string): Promise<void> {
 export function describe(result: Result, background: boolean, failures: number): [string, string] | null {
   const settings = getSettings();
   if (result.kind !== 'backup') return null;
+  if (result.status === 'warning' && result.left?.length) {
+    // A whole album, folder or the photo library was left out: that is a problem, not a detail.
+    return settings.notifyProblems ? ['Not everything was backed up', result.left[0]] : null;
+  }
   if (result.status === 'success' || result.status === 'warning') {
     if (!settings.notifyFinished || !result.newFiles) return null; // nothing new: nothing to say
     // Nothing sent means the content was already stored (a copy of something backed up before).
@@ -87,7 +91,7 @@ export async function notifyResult(result: Result, background: boolean): Promise
   const state = getState();
   const message = describe(result, background, state.failures);
   if (!message) return;
-  const problem = result.status !== 'success' && result.status !== 'warning';
+  const problem = (result.status !== 'success' && result.status !== 'warning') || !!result.left?.length;
   if (problem && background) {
     if (Date.now() - state.lastProblemNotice < DAY * 1000) return; // at most one a day
     updateState({ lastProblemNotice: Date.now() });

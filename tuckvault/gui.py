@@ -185,7 +185,7 @@ class App(tk.Tk):
         self.key_banner = ttk.Label(tab, foreground="#9a5b00", cursor="hand2", wraplength=740,
                                     text="Your recovery key is not saved yet. Without it the backups "
                                          "cannot be read if this PC is lost. Click here to save it.")
-        self.key_banner.bind("<Button-1>", lambda e: self.notebook.select(3))
+        self.key_banner.bind("<Button-1>", lambda e: self.notebook.select(self.security_tab))
 
         box = ttk.LabelFrame(tab, text="What to back up", padding=PAD)
         box.grid(row=1, column=0, sticky="nsew")
@@ -324,6 +324,7 @@ class App(tk.Tk):
     def _build_security_tab(self):
         tab = ttk.Frame(self.notebook, padding=PAD * 2)
         self.notebook.add(tab, text="  Security  ")
+        self.security_tab = tab
         text = (
             "How your backups are protected\n\n"
             "•  Everything is encrypted on this PC (AES-256) before it is sent. The backup "
@@ -1054,7 +1055,8 @@ class App(tk.Tk):
         ttk.Label(frame, wraplength=460, justify="left",
                   text="Paste the recovery key of the backups you want to open. This replaces "
                        "the key on this PC, so only do it on a new PC or after saving the "
-                       "current key.").pack(anchor="w")
+                       "current key. To open a phone's backups, use \"Restore a phone's backup\" "
+                       "on the Phones tab instead.").pack(anchor="w")
         value = tk.StringVar()
         entry = ttk.Entry(frame, textvariable=value, width=72, font=("Consolas", 9))
         entry.pack(pady=PAD, fill="x")
@@ -1062,6 +1064,15 @@ class App(tk.Tk):
 
         def ok():
             try:
+                if keystore.would_replace(value.get()) and not messagebox.askyesno(
+                        "Replace this PC's key?",
+                        "This PC already has a different backup key"
+                        + ("" if self.cfg.get("recovery_key_saved") else ", and it is not marked as saved")
+                        + ". After replacing it, the backups made with the current key can only be "
+                        "read with that key.\n\nIf this is your phone's key, choose No: phone "
+                        "backups are opened from the Phones tab.\n\nReplace the key on this PC?",
+                        icon="warning", default="no", parent=dialog):
+                    return
                 keystore.import_recovery_key(value.get())
             except (ValueError, OSError) as e:
                 messagebox.showerror("Tuckvault", str(e), parent=dialog)

@@ -71,6 +71,8 @@ export type Result = {
   unchanged?: boolean;
   /** Every stored piece of every backup was re-checked during this run. */
   scrubbed?: boolean;
+  /** Whole sources this run could not back up (photos not allowed, an album or folder gone). */
+  left?: string[];
 };
 
 export type Session = {

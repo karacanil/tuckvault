@@ -5,6 +5,7 @@ else (widgets, worker thread, progress queue, engine, storage agent) is
 the real thing against a repository in a temp folder.
 """
 
+import gc
 import os
 import shutil
 import sys
@@ -54,6 +55,11 @@ class GuiFlow(unittest.TestCase):
             self.app.destroy()
         except Exception:
             pass
+        # Free the window's Tk objects now, on this thread. Left to the garbage
+        # collector, they can be freed later on a worker thread of another
+        # test, which makes Tk abort the whole run on Linux.
+        self.app = None
+        gc.collect()
         for var in ("TUCKVAULT_HOME", "TUCKVAULT_TASK_NAME"):
             os.environ.pop(var, None)
         shutil.rmtree(self.tmp, ignore_errors=True)

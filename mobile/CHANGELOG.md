@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Each chosen album is now kept as its own group of backups. An album that is
+  deleted, empty or cannot be read no longer has its last backups removed
+  over time; the app says that nothing from it was backed up.
+- When Tuckvault may no longer see the photos, or an album or folder is gone,
+  the home screen says **Not everything was backed up** (and a notification
+  says so) instead of "Backed up, with a few files skipped".
+- **Settings, Connect again** pairs the phone anew, for example after it was
+  removed on the computer. Until now the only button there was Disconnect,
+  which also forgets the backup key.
 - Connecting to the computer is now one scan: point the phone's camera at the
   code Tuckvault shows on the computer, check the address the app shows, and
   tap **Connect to this computer**. Typing the address and code still works.

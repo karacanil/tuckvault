@@ -45,6 +45,8 @@ def main(argv=None) -> int:
     key = sub.add_parser("key", help="show or import the recovery key")
     key.add_argument("action", choices=["show", "import"])
     key.add_argument("value", nargs="?")
+    key.add_argument("--replace", action="store_true",
+                     help="import even though this PC already has a different key")
     sub.add_parser("test", help="test the connection to the backup machine")
     sub.add_parser("watch", help="notify if automatic backups have stopped happening "
                                  "(started daily by Windows)")
@@ -159,8 +161,14 @@ def main(argv=None) -> int:
             _out("usage: tuckvault key import <recovery key>")
             return 1
         try:
+            if keystore.would_replace(args.value) and not args.replace:
+                _out("This PC already has a different backup key. Backups made with it can only "
+                     "be read with that key, so save it first (tuckvault key show). To open a "
+                     "phone's backups, use: tuckvault phone restore. To replace the key anyway, "
+                     "add --replace after the key.")
+                return 1
             keystore.import_recovery_key(args.value)
-        except ValueError as e:
+        except (ValueError, OSError) as e:
             _out(str(e))
             return 1
         _out("Key imported.")

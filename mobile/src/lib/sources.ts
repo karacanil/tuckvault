@@ -21,6 +21,11 @@ export type Scan = {
   sources: string[];
   /** Things the user should know, such as a folder that is no longer reachable. */
   warnings: string[];
+  /**
+   * The ones among those warnings that mean a whole source was left out (photos not allowed, an
+   * album or folder gone). Such a source is not listed in `sources`, so its earlier backups are kept.
+   */
+  left: string[];
   photos: number;
   videos: number;
   files: number;
@@ -107,39 +112,65 @@ export async function listAlbums(): Promise<AlbumChoice[]> {
 async function scanLibrary(settings: Settings, out: Scan): Promise<void> {
   const access = await photoAccess();
   if (access === 'none' || access === 'ask') {
-    out.warnings.push('Tuckvault is not allowed to see your photos, so they were not backed up. ' +
+    leaveOut(out, 'Tuckvault is not allowed to see your photos, so no photo was backed up. ' +
       'Allow it in the phone\'s settings.');
     return; // not listed as a source: the photo backups already made are kept
   }
   // With access to selected photos only, what is seen is not the library. It is kept as a source
   // of its own, so these smaller backups never count against (and push out) backups of everything.
-  // The same goes for chosen albums: they are backed up as a source of their own.
+  // Each chosen album is a source of its own too: an album that is gone or cannot be read is left
+  // out of the sources, so its last backups are kept instead of ageing out.
   const chosen = settings.albums || [];
-  const source = chosen.length ? 'Photos (albums)' : access === 'limited' ? 'Photos (selected)' : 'Photos';
+  if (!chosen.length) {
+    const source = access === 'limited' ? 'Photos (selected)' : 'Photos';
+    await scanAssets(settings, source, null, new Set(), out);
+    out.sources.push(source);
+    return;
+  }
   const seen = new Set<string>(); // a photo can be in several albums
-  let readable = 0;
-  for (const album of chosen.length ? chosen : [null]) {
+  const taken = new Set<string>();
+  for (const album of chosen) {
+    let source = albumSource(album);
+    for (let n = 2; taken.has(source); n++) source = albumSource(album) + ' (' + n + ')';
+    taken.add(source);
+    let rows: number;
     try {
-      await scanAssets(settings, source, album, seen, out);
-      readable += 1;
-    } catch (e) {
-      if (!album) throw e;
-      out.warnings.push('The album "' + album.title + '" could not be read, so it was not backed up. ' +
-        'If it was deleted, choose the albums again in Settings.');
+      rows = await scanAssets(settings, source, album, seen, out);
+    } catch {
+      rows = -1;
+    }
+    // (An album that was deleted on Android simply answers with nothing.)
+    if (rows > 0) out.sources.push(source);
+    else {
+      leaveOut(out, 'The album "' + album.title + '" ' + (rows < 0 ? 'could not be read' : 'is empty or gone') +
+        ', so nothing from it was backed up. Its earlier backups are kept. If it was deleted, ' +
+        'choose the albums again in Settings.');
     }
   }
-  if (readable) out.sources.push(source); // otherwise the backups already made are kept as they are
 }
 
+/** The name a chosen album's photos are kept under for keeping old backups: "Photos (album: <name>)". */
+export function albumSource(album: ChosenAlbum): string {
+  return 'Photos (album: ' + clean(album.title || 'Untitled') + ')';
+}
+
+function leaveOut(out: Scan, text: string) {
+  out.warnings.push(text);
+  out.left.push(text);
+}
+
+/** Returns how many things the library listed, before any were set aside. */
 async function scanAssets(settings: Settings, source: string, album: ChosenAlbum | null, seen: Set<string>,
-                          out: Scan): Promise<void> {
+                          out: Scan): Promise<number> {
   const found: Item[] = [];
   let photos = 0;
   let videos = 0;
+  let rows = 0;
   for (let offset = 0; ; offset += PAGE) {
     let query = new Query().orderBy({ key: AssetField.CREATION_TIME, ascending: true });
     if (album) query = query.album(new Album(album.id));
     const page = await query.limit(PAGE).offset(offset).exeForMetadata();
+    rows += page.length;
     for (const asset of page) {
       const video = asset.mediaType === MediaType.VIDEO;
       if (!video && asset.mediaType !== MediaType.IMAGE) continue;
@@ -168,6 +199,7 @@ async function scanAssets(settings: Settings, source: string, album: ChosenAlbum
   out.items.push(...found);
   out.photos += photos;
   out.videos += videos;
+  return rows;
 }
 
 /** The name a folder's files are filed under: "Files/<name>". */
@@ -180,8 +212,8 @@ async function scanFolder(folder: Folder, source: string, out: Scan): Promise<vo
   try {
     entries = await Native.listTree(folder.uri);
   } catch {
-    out.warnings.push('The folder "' + folder.name + '" could not be opened, so it was not backed up. ' +
-      'Remove it and add it again in Settings.');
+    leaveOut(out, 'The folder "' + folder.name + '" could not be opened, so it was not backed up. ' +
+      'Its earlier backups are kept. Remove it and add it again in Settings.');
     return;
   }
   out.sources.push(source);
@@ -199,7 +231,7 @@ export function inboxFolder(): Folder {
 }
 
 export async function scan(settings: Settings): Promise<Scan> {
-  const out: Scan = { items: [], sources: [], warnings: [], photos: 0, videos: 0, files: 0 };
+  const out: Scan = { items: [], sources: [], warnings: [], left: [], photos: 0, videos: 0, files: 0 };
   if (settings.photos && photosPossible) await scanLibrary(settings, out);
   // (Inside Expo Go there is no Files-app folder: the app's storage there belongs to Expo Go.)
   const folders = RN.OS === 'ios' ? (settings.inbox && !inExpoGo ? [inboxFolder()] : []) : settings.folders;

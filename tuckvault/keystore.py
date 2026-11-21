@@ -90,5 +90,18 @@ def recovery_key():
     return crypto.encode_recovery_key(master) if master else None
 
 
+def would_replace(text: str) -> bool:
+    """True if importing this recovery key would replace a different key on this PC.
+
+    A key file that cannot be read counts as a key that would be replaced.
+    Raises ValueError for text that is not a recovery key."""
+    new = crypto.decode_recovery_key(text)
+    try:
+        current = load()
+    except OSError:
+        return paths.key_file().exists()
+    return current is not None and current != new
+
+
 def import_recovery_key(text: str) -> None:
     store(crypto.decode_recovery_key(text))

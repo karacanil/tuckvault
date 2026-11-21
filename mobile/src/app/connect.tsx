@@ -6,7 +6,7 @@ import { KeyboardAvoidingView, Platform, TextInput, View } from 'react-native';
 import { BackupError, hello, normalizeAddress, pair, scannedPairing } from '../lib/client';
 import { device } from '../lib/device';
 import { nextSetupStep } from '../lib/setup';
-import { getSettings, setPairingSecret, updateSettings } from '../lib/store';
+import { getMasterKey, getSettings, setPairingSecret, updateSettings } from '../lib/store';
 import { Button, Card, Field, H2, Notice, P, Screen } from '../ui/kit';
 import { space } from '../ui/theme';
 
@@ -48,7 +48,12 @@ export default function Connect() {
       }
       updateSettings({ server: { url, device: server.device, name: server.name || computer.name },
                        deviceName: name.trim() || 'Phone' });
-      router.replace(nextSetupStep());
+      if (getSettings().onboarded && getMasterKey()) { // connecting again: nothing else to set up
+        router.dismissAll();
+        router.replace('/(tabs)');
+      } else {
+        router.replace(nextSetupStep());
+      }
     } catch (e) {
       setError(e instanceof BackupError ? e.message : 'Something went wrong: ' + String(e).slice(0, 160));
     } finally {
@@ -74,7 +79,8 @@ export default function Connect() {
             {connected ? (
               <View style={{ marginBottom: space.lg }}>
                 <Notice testID="replaces-connection" kind="warn">
-                  {`This phone is already connected to ${connected.name || 'a computer'}. Connecting replaces that connection.`}
+                  {`This phone is already connected to ${connected.name || 'a computer'}. Connecting replaces that connection; ` +
+                   'the backups and the recovery key stay as they are.'}
                 </Notice>
               </View>
             ) : null}

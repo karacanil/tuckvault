@@ -3,6 +3,25 @@
 The phone app has its own version numbers and notes: see
 [mobile/CHANGELOG.md](mobile/CHANGELOG.md).
 
+## Unreleased
+
+- A selected folder or file that is missing at backup time (an unplugged
+  drive, say) no longer uses up its "keep the last" places. Until now every
+  backup counted for every selected item, found or not, so after enough
+  nights the last copies of a missing item were removed. Now only backups
+  that really hold something from an item count for it, older backups
+  included, and the run says plainly that nothing from that item was backed
+  up.
+- An item that was not backed up no longer counts as backed up for the
+  overdue warning.
+- Importing a recovery key that differs from the PC's own key now asks
+  first, in the window. `tuckvault key import` refuses it unless
+  `--replace` is added after the key. Phone backups are opened with
+  **Restore a phone's backup** (or `tuckvault phone restore`) and need no
+  import.
+- The "recovery key not saved" banner opens the Security tab again (it
+  opened Phones).
+
 ## 1.6.0
 
 - Pairing a phone is now one scan. **Pair a phone…** (and `tuckvault phone
