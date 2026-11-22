@@ -3,7 +3,7 @@
 The phone app has its own version numbers and notes: see
 [mobile/CHANGELOG.md](mobile/CHANGELOG.md).
 
-## Unreleased
+## 1.6.1
 
 - A selected folder or file that is missing at backup time (an unplugged
   drive, say) no longer uses up its "keep the last" places. Until now every
